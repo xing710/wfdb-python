@@ -2,3 +2,4 @@ from .records import Record, MultiRecord, rdheader, rdsamp, srdsamp, wrsamp, dld
 from .annotations import Annotation, rdann, wrann, showanncodes
 from .plots import plotrec, plotann
 from .downloads import getdblist
+from . import processing
