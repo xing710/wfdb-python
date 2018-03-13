@@ -32,7 +32,9 @@ def rdwindaq(file_name, sampfrom=0, sampto=None, channels='all'):
 
     fields = _rdheader(fp)
 
-    signal = _rdsignal(fp, fields['sig_len'], fields['n_sig'])
+    signal = _rdsignal(fp, fields['header_size'], fields['sig_len'],
+                       fields['n_sig'])
+    fp.close()
 
     signal = _dac(signal, fields)
 
@@ -80,8 +82,6 @@ def _rdheader(fp):
     # element 14, bytes 36-39
     start_time_offset = struct.unpack('<l', fp.read(4))[0]
     # Skip to element 27
-
-
     fp.seek(100)
     # element 27, bytes 100-101
     packing_info = struct.unpack('<H', fp.read(2))[0]
@@ -89,6 +89,7 @@ def _rdheader(fp):
     # (packed files are WinDaq/Pro+ files with at least one channel
     # that has a sample rate divisor other than 1)
     packed = bool(packing_info & 8192)
+    high_res = bool(packing_info & 2)
     # Skip to element 34
     fp.seek(110)
 
@@ -115,6 +116,7 @@ def _rdheader(fp):
         # skip to next channel
         fp.seek(4, 1)
 
+
     # Adjust number of data bytes if file is not packed
     if packed:
         pass
@@ -123,24 +125,24 @@ def _rdheader(fp):
 
     sig_len = int(data_size / 2 / n_sig)
 
-    fields = {'n_sig':n_sig, 'sig_len':sig_len,
+    fields = {'header_size':header_size, 'fs':fs, 'n_sig':n_sig,
+              'sig_len':sig_len,
               'slope': slope, 'intercept':intercept, 'units':units,
               'sample_rate_divisor':sample_rate_divisor}
 
     return fields
 
 
-def _rdsignal(f, sig_len, n_sig):
+def _rdsignal(fp, header_size, sig_len, n_sig):
     """
     Read the signal
     """
-    signal = np.fromfile(f, dtype='<i2', count=sig_len * n_sig)
-
+    fp.seek(header_size)
+    signal = np.fromfile(fp, dtype='<i2', count=sig_len * n_sig)
     # Keep 14 lsb
     np.right_shift(signal, 2, out=signal)
     # Assume no differential treatment for packed and unpacked files?
     signal = signal.reshape((sig_len, n_sig))
-
     return signal
 
 
