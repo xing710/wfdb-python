@@ -101,12 +101,23 @@ def _rdheader(fp):
     sample_rate_divisor = []
 
     for ch in range(n_sig):
+        # Which are the actual slope and intercept? 1,2 or 3,4?
+
+        # item 1, bytes 0-3, 4 bytes
+        slope.append(struct.unpack('<f', fp.read(4))[0])
+        # item 2, bytes 4-7, 4 bytes
+        intercept.append(struct.unpack('<f', fp.read(4))[0])
+        fp.seek(16, 1)
+
         # Skip to item 3
-        fp.seek(8, 1)
+        #fp.seek(8, 1)
         # item 3, bytes 8-15, 8 bytes
-        slope.append(struct.unpack('<d', fp.read(8))[0])
+        #slope.append(struct.unpack('<d', fp.read(8))[0])
         # item 4, bytes 16-23, 8 bytes
-        intercept.append(struct.unpack('<d', fp.read(8))[0])
+        #intercept.append(struct.unpack('<d', fp.read(8))[0])
+
+
+
         # item 5, bytes 24-29, 6 bytes
         units.append(struct.unpack('6s', fp.read(6))[0].decode('ascii')[:4].strip())
         # skip to item 7
@@ -149,6 +160,14 @@ def _rdsignal(fp, header_size, sig_len, n_sig):
 def _dac(signal, fields):
     """
     Perform dac
+
+    " Note that any A-D converter count obtained by WinDaq may be converted to
+    an equivalent engineering unit by first arithmetic shifting the 16-bit
+    number to the right by two bits (to preserve the sign), multiplying by the
+    slope m, and adding the intercept b.
+
+    For HiRes data, replace the right shift with multiplication (times) 0.25."
+
     """
 
     return signal
