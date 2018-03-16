@@ -12,46 +12,44 @@ import pandas as pd
 import zstd
 
 
-_extensions = {'bz2':'bz2', 'gzip':'gz', 'lz4':'lz4', 'zstd':'zst'}
-
-def compress_file(file, fmt, level,
-                  write_dir='/home/cx1111/Downloads/compressed/'):
+def compress_file(file, fmt, level):
     """
-    Compress a file with a particular fmt, delete it, and return the
-    compressed file size.
+    Compress and decompress a file with a particular fmt. Return
+    compressed size and time for compression/decompression.
 
     """
 
     with open(file, 'rb') as f_in:
-        compressed_file = (os.path.join(write_dir, os.path.basename(file))
-                           + _extensions[fmt])
+        u_data = f_in.read()
 
-        # slightly different api for zstd
+        t0 = time.time()
+
         if fmt == 'zstd':
-            cctx = zstd.ZstdCompressor(level=level)
-            f_out =  open(compressed_file, 'wb')
-            cctx.copy_stream(f_in, f_out)
-        else:
-            if fmt == 'bz2':
-                f_out = bz2.BZ2File(compressed_file, 'wb',
-                                    compresslevel=level)
-            elif fmt == 'gzip':
-                f_out = gzip.GzipFile(compressed_file, 'wb',
-                                      compresslevel=level)
-            elif fmt == 'lz4':
-                f_out = lz4.frame.open(compressed_file, 'wb',
-                                       compression_level=level)
+            cctx = zstd.ZstdCompressor(level=level, write_content_size=True)
+            c_data = cctx.compress(u_data)
+            t1 = time.time()
+            dctx = zstd.ZstdDecompressor()
+            u_data = dctx.decompress(c_data)
+        elif fmt == 'bz2':
+            c_data = bz2.compress(u_data, compresslevel=level)
+            t1 = time.time()
+            u_data = bz2.decompress(c_data)
+        elif fmt == 'gzip':
+            c_data = gzip.compress(u_data, compresslevel=level)
+            t1 = time.time()
+            u_data = gzip.decompress(c_data)
+        elif fmt == 'lz4':
+            c_data = lz4.frame.compress(u_data, compression_level=level)
+            t1 = time.time()
+            u_data = lz4.frame.decompress(c_data)
 
-            copyfileobj(f_in, f_out)
+        compressed_size = len(c_data)
 
-        f_out.close()
+        t2 = time.time()
+        t_compress = t1 - t0
+        t_decompress = t2 - t1
 
-        compressed_size = os.path.getsize(compressed_file)
-
-        # cleanup
-        os.remove(compressed_file)
-
-    return compressed_size
+    return compressed_size, t_compress, t_decompress
 
 
 # can change header
@@ -73,31 +71,27 @@ def test_compression(fmt, compress_level):
     n_files = len(test_dat_files)
 
     uncompressed_sizes = [os.path.getsize(file) for file in test_dat_files]
-    compressed_sizes = []
-
-    t_start = time.time()
-
 
     with Pool(os.cpu_count() - 1) as pool:
-        compressed_sizes = pool.starmap(compress_file,
+        output = pool.starmap(compress_file,
                                         zip(test_dat_files,
                                             n_files * [fmt],
                                             n_files * [compress_level]))
-
-    t_end = time.time()
-    t_elapsed = t_end - t_start
+    compressed_sizes, compression_times, decompression_times = zip(*output)
 
     uncompressed_sizes = np.array(uncompressed_sizes)
     compressed_sizes = np.array(compressed_sizes)
+    decompression_times = np.array(decompression_times)
     compression_ratios = uncompressed_sizes / compressed_sizes
 
     # Return the compression ratios and time taken
     return (uncompressed_sizes, compressed_sizes, compression_ratios,
-            t_elapsed)
+            compression_times, decompression_times)
 
 
 def summarize_compression(uncompressed_sizes, compressed_sizes,
-                          compression_ratios, t_elapsed, mode='print'):
+                          compression_ratios, compression_times,
+                          decompression_times, mode='print'):
     """
     Print or return a summary of the compression
 
@@ -115,6 +109,10 @@ def summarize_compression(uncompressed_sizes, compressed_sizes,
                              for i in range(n_files)])
     smallest_overall_compression_ratio = uncompressed_total / smallest_total
 
+    # Total times
+    t_compress = np.sum(compression_times)
+    t_decompress = np.sum(decompression_times)
+
     if mode == 'print':
         print('Number of files compressed: %d' % n_files)
         print('Total size of uncompressed files: %s'
@@ -125,10 +123,11 @@ def summarize_compression(uncompressed_sizes, compressed_sizes,
               % overall_compression_ratio)
         print('Overall compression ratio without compressing inflated files: %.2f'
               % smallest_overall_compression_ratio)
-        print('Total time elapsed: %d' % t_elapsed)
+        print('Total compression time: %.2f' % t_compress)
+        print('Total compression time: %.2f' % t_decompress)
     else:
         return (n_files, uncompressed_total, compressed_total,
-                overall_compression_ratio)
+                overall_compression_ratio, t_compress, t_decompress)
 
 
 def compare_compressions(fmts, compress_levels):
@@ -139,7 +138,9 @@ def compare_compressions(fmts, compress_levels):
     """
     df = pd.DataFrame(columns=['fmt', 'compress_level', 'n_files',
                                'uncompressed_total', 'compressed_total',
-                               'compression_ratio', 'time_elapsed'])
+                               'compression_ratio', 'time_compress',
+                               'time_decompress'])
+
     # Iterate through formats and compress levels
     for i in range(len(fmts)):
         fmt = fmts[i]
@@ -147,20 +148,23 @@ def compare_compressions(fmts, compress_levels):
         print('Testing fmt: %s, compress level: %d' % (fmt, compress_level))
 
         (uncompressed_sizes, compressed_sizes, compression_ratios,
-            t_elapsed) = test_compression(fmt=fmt,
+         compression_times, decompression_times) = test_compression(fmt=fmt,
                                           compress_level=compress_level)
 
         (n_files, uncompressed_total,
          compressed_total,
-         overall_compression_ratio) = summarize_compression(uncompressed_sizes,
-                                                            compressed_sizes,
-                                                            compression_ratios,
-                                                            t_elapsed,
-                                                            mode='return')
+         overall_compression_ratio,
+         t_compress, t_decompress) = summarize_compression(uncompressed_sizes,
+                                                           compressed_sizes,
+                                                           compression_ratios,
+                                                           compression_times,
+                                                           decompression_times,
+                                                           mode='return')
 
         df.loc[i] = [fmt, compress_level, n_files,
                      cx.readable_size(uncompressed_total, 'string'),
                      cx.readable_size(compressed_total, 'string'),
-                     '%.2f' % overall_compression_ratio, '%.2f' % t_elapsed]
+                     '%.2f' % overall_compression_ratio, '%.2f' % t_compress,
+                     '%.2f' % t_decompress]
 
     return df
