@@ -1,3 +1,10 @@
+"""
+Module for reading ME6000 .tff format files.
+
+http://www.biomation.com/kin/me6000.htm
+
+"""
+
 import struct
 
 import numpy as np
@@ -5,15 +12,6 @@ import numpy as np
 import pdb
 
 
-"""
-- the data file header
-- the acquired ADC data
-
-ME6000 .tff format
-
-
-
-"""
 
 
 def rdtff(file_name, sampfrom=0, sampto=None, channels='all'):
