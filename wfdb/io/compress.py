@@ -71,7 +71,7 @@ def compress_file(file, fmt, level):
                 file, record.n_sig, record.fs, wfdbfmtres(record.fmt[0]), level, out_file)
             subprocess.run(compress_command, shell=True)
             t1 = time.time()
-            decompress_command = "flac -d %s -c" % out_file
+            decompress_command = "flac -d %s -c > /dev/null" % out_file
             subprocess.run(decompress_command, shell=True)
 
         t2 = time.time()
@@ -161,8 +161,9 @@ def compare_compressions(fmts, compress_levels):
 
         compression_results.loc[i] = [fmt, compress_level,
                                       '%.2f' % compression_ratio,
-                                      str(timedelta(seconds=int(compression_time))),
+                                      str(timedelta(seconds=int(compression_time))), # for readable time
                                       str(timedelta(seconds=int(decompression_time)))]
-
+                                      #compression_time,  # for seconds
+                                      #decompression_time]
     print('Full benchmark complete')
     return compression_results, dataset_info
