@@ -528,15 +528,20 @@ class SignalMixin(object):
                 else:
                     gain = 1 / pmin
                     baseline = 0
-            # Regular mixed signal case
-            # Todo:
+            # Regular varied signal case. Map pmax->dmax, pmin->dmin
             else:
+                # The equation is: p = (d - b) / g
+                # pmax maps to dmax, and pmin maps to dmin. Gradient
+                # will be close to delta(d) / delta(p), since intercept
+                # baseline has to be an integer.
                 gain = (dmax-dmin) / (pmax-pmin)
                 baseline = dmin - gain*pmin
-
-            # What about roundoff error? Make sure values don't map to beyond
-            # range.
-            baseline = int(baseline)
+                # The baseline needs to be an integer
+                baseline = np.floor(baseline)
+                # Adjust the gain to map pmin to dmin. This is to ensure
+                # there is no overshoot of dmax. Now pmax will map to
+                # dmax or dmax-1 which is also fine.
+                gain = (dmin - baseline / pmin)
 
             # WFDB library limits...
             if abs(gain)>214748364 or abs(baseline)>2147483648:
