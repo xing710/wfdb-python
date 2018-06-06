@@ -4,13 +4,15 @@ Module for reading ME6000 .tff format files.
 http://www.biomation.com/kin/me6000.htm
 
 """
+import datetime
 import os
 import struct
+import pdb
 
 import numpy as np
 
 
-def rdtff(file_name, sampfrom=0, sampto=None, channels='all'):
+def rdtff(file_name, cut_end=False):
     """
     Read values from a tff file
 
@@ -18,33 +20,41 @@ def rdtff(file_name, sampfrom=0, sampto=None, channels='all'):
     ----------
     file_name : str
         Name of the .tff file to read
-    sampfrom : int, optional
-        Starting sample number to read
-    sampto : int, optional
-        Stopping sample number to read
-    channels : list, optional
-        List of integers specifying the desired channels. Leave as 'all'
-        to return all channels
+    cut_end : bool, optional
+        If True, cuts out the last sample for all channels. This is for
+        reading files which appear to terminate with the incorrect
+        number of samples (ie. sample not present for all channels).
 
+    Returns
+    -------
+    signal : numpy array
+        A 2d numpy array storing the physical signals from the record.
+    fields : dict
+        A dictionary containing several key attributes of the read record.
+    markers : numpy array
+        A 1d numpy array storing the marker locations.
+    triggers : numpy array
+        A 1d numpy array storing the trigger locations.
 
     Notes
     -----
     This function is slow because tff files may contain any number of
     escape sequences interspersed with the signals. There is no way to
+    know the number of samples/escape sequences beforehand, so the file
+    is inefficiently parsed a small chunk at a time.
 
     It is recommended that you convert your tff files to wfdb format.
-
 
     """
     file_size = os.path.getsize(file_name)
     with open(file_name, 'rb') as fp:
-        fields, header_size = _rdheader(fp)
+        fields, file_fields = _rdheader(fp)
         signal, markers, triggers = _rdsignal(fp, file_size=file_size,
-                                              header_size=header_size,
-                                              n_sig=fields['n_sig'],
-                                              bit_width=fields['bit_width'],
-                                              is_signed=fields['is_signed'])
-    signal = _dac(signal, fields)
+                                              header_size=file_fields['header_size'],
+                                              n_sig=file_fields['n_sig'],
+                                              bit_width=file_fields['bit_width'],
+                                              is_signed=file_fields['is_signed'],
+                                              cut_end=cut_end)
     return signal, fields, markers, triggers
 
 
@@ -63,8 +73,12 @@ def _rdheader(fp):
         pad_len = (4 - (data_size % 4)) % 4
         pos = fp.tell()
         # Currently, most tags will be ignored...
+        # storage method
+        if tag == 1001:
+            storage_method = fs = struct.unpack('B', fp.read(1))[0]
+            storage_method = {0:'recording', 1:'manual', 2:'online'}[storage_method]
         # fs, unit16
-        if tag == 1003:
+        elif tag == 1003:
             fs = struct.unpack('>H', fp.read(2))[0]
         # sensor type
         elif tag == 1007:
@@ -95,28 +109,48 @@ def _rdheader(fp):
                         break
                 existing_count = [base_name in name for name in sig_name].count(True)
                 sig_name.append('%s_%d' % (base_name, existing_count))
+        # Display scale. Probably not useful.
+        elif tag == 1009:
+            # 100, 500, 1000, 2500, or 8500uV
+            display_scale = struct.unpack('>I', fp.read(4))[0]
         # sample format, uint8
         elif tag == 3:
             sample_fmt = struct.unpack('B', fp.read(1))[0]
             is_signed = bool(sample_fmt >> 7)
             # ie. 8 or 16 bits
             bit_width = sample_fmt & 127
+        # Measurement start time - seconds from 1.1.1970 UTC
+        elif tag == 101:
+            n_seconds = struct.unpack('>I', fp.read(4))[0]
+            base_datetime = datetime.datetime.utcfromtimestamp(n_seconds)
+            base_date = base_datetime.date()
+            base_time = base_datetime.time()
+        # Measurement start time - minutes from UTC
+        elif tag == 102:
+            n_minutes = struct.unpack('>h', fp.read(2))[0]
         # Go to the next tag
         fp.seek(pos + data_size + pad_len)
     header_size = fp.tell()
+    # For interpreting the waveforms
     fields = {'fs':fs, 'n_sig':n_sig, 'sig_name':sig_name,
-              'bit_width':bit_width, 'is_signed':is_signed}
-    return fields, header_size
+              'base_time':base_time, 'base_date':base_date}
+    # For reading the signal samples
+    file_fields = {'header_size':header_size, 'n_sig':n_sig,
+                   'bit_width':bit_width, 'is_signed':is_signed}
+    return fields, file_fields
 
 
-def _rdsignal(fp, file_size, header_size, n_sig, bit_width, is_signed):
+def _rdsignal(fp, file_size, header_size, n_sig, bit_width, is_signed, cut_end):
     """
     Read the signal
 
     Parameters
     ----------
-    fast_read : bool, optional
-        If True, will assume there are no escape sequences in the file.
+    cut_end : bool, optional
+        If True, enables reading the end of files which appear to terminate
+        with the incorrect number of samples (ie. sample not present for all channels),
+        by checking and skipping the reading the end of such files.
+        Checking this option makes reading slower.
     """
     # Cannot initially figure out signal length because there
     # are escape sequences.
@@ -131,11 +165,11 @@ def _rdsignal(fp, file_size, header_size, n_sig, bit_width, is_signed):
         dtype = 'u' + dtype
     # big endian
     dtype = '>' + dtype
-
     # The maximum possible samples given the file size
-    max_samples = int(signal_size / byte_width)
     # All channels must be present
+    max_samples = int(signal_size / byte_width)
     max_samples = max_samples - max_samples % n_sig
+    # Output information
     signal = np.empty(max_samples, dtype=dtype)
     markers = []
     triggers = []
@@ -143,42 +177,47 @@ def _rdsignal(fp, file_size, header_size, n_sig, bit_width, is_signed):
     sample_num = 0
 
     # Read one sample for all channels at a time
-    while True:
-        chunk = fp.read(2)
-        if not chunk:
-            break
-        tag = struct.unpack('>h', chunk)[0]
-        # Escape sequence
-        if tag == -32768:
-            # Escape sequence structure: int16 marker, uint8 type,
-            # uint8 length, uint8 * length data, padding % 2
-            escape_type = struct.unpack('B', fp.read(1))[0]
-            data_len = struct.unpack('B', fp.read(1))[0]
-            # Marker*
-            if escape_type == 1:
-                # *In manual mode, this could be block start/top time.
-                # But we are assuming it is not in manual mode.
-                markers.append(sample_num / n_sig)
-            # Trigger
-            elif escape_type == 2:
-                triggers.append(sample_num / n_sig)
-            fp.seek(data_len + data_len % 2, 1)
-        # Regular samples
-        else:
-            fp.seek(-2, 1)
-            signal[sample_num:sample_num + n_sig] = np.fromfile(
-                fp, dtype=dtype, count=n_sig)
-            sample_num += n_sig
+    if cut_end:
+        stop_byte = file_size - n_sig * byte_width + 1
+        while fp.tell() < stop_byte:
+            chunk = fp.read(2)
+            sample_num = _get_sample(fp, chunk, n_sig, dtype, signal, markers, triggers, sample_num)
+    else:
+        while True:
+            chunk = fp.read(2)
+            if not chunk:
+                break
+            sample_num = _get_sample(fp, chunk, n_sig, dtype, signal, markers, triggers, sample_num)
 
-        signal = signal[:sample_num]
-        signal = signal.reshape((-1, n_sig))
-        markers = np.array(markers, dtype='int')
-        triggers = np.array(triggers, dtype='int')
+    # No more bytes to read. Reshape output arguments.
+    signal = signal[:sample_num]
+    signal = signal.reshape((-1, n_sig))
+    markers = np.array(markers, dtype='int')
+    triggers = np.array(triggers, dtype='int')
     return signal, markers, triggers
 
 
-def _dac(signal, fields):
-    """
-    Perform dac
-    """
-    return signal
+def _get_sample(fp, chunk, n_sig, dtype, signal, markers, triggers, sample_num):
+    tag = struct.unpack('>h', chunk)[0]
+    # Escape sequence
+    if tag == -32768:
+        # Escape sequence structure: int16 marker, uint8 type,
+        # uint8 length, uint8 * length data, padding % 2
+        escape_type = struct.unpack('B', fp.read(1))[0]
+        data_len = struct.unpack('B', fp.read(1))[0]
+        # Marker*
+        if escape_type == 1:
+            # *In manual mode, this could be block start/top time.
+            # But we are it is just a single time marker.
+            markers.append(sample_num / n_sig)
+        # Trigger
+        elif escape_type == 2:
+            triggers.append(sample_num / n_sig)
+        fp.seek(data_len + data_len % 2, 1)
+    # Regular samples
+    else:
+        fp.seek(-2, 1)
+        signal[sample_num:sample_num + n_sig] = np.fromfile(
+            fp, dtype=dtype, count=n_sig)
+        sample_num += n_sig
+    return sample_num

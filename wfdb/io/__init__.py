@@ -5,3 +5,4 @@ from .annotation import (Annotation, rdann, wrann, show_ann_labels,
                          show_ann_classes)
 from .download import get_dbs, get_record_list, dl_files
 from .windaq import rdwindaq
+from .tff import rdtff
