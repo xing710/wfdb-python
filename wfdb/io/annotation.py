@@ -1,8 +1,10 @@
 import copy
-import numpy as np
 import os
-import pandas as pd
 import re
+import pdb
+
+import numpy as np
+import pandas as pd
 
 from . import download
 from . import _header
@@ -913,6 +915,15 @@ class Annotation(object):
         else:
             return target_item
 
+    def to_df(self):
+        """
+        Convert annotation object to a pandas dataframe
+
+        """
+        df = pd.DataFrame()
+
+
+
 
 def label_triplets_to_df(triplets):
     """
@@ -1267,9 +1278,9 @@ def rdann(record_name, extension, sampfrom=0, sampto=None, shift_samps=False,
      chan, num, aux_note) = rm_empty_indices(rm_inds, sample, label_store,
                                              subtype, chan, num, aux_note)
 
-    # Convert lists to numpy arrays dtype='int'
-    (sample, label_store, subtype,
-     chan, num) = lists_to_int_arrays(sample, label_store, subtype, chan, num)
+    # Convert lists to numpy arrays
+    (sample, label_store, subtype, chan, num) = lists_to_arrays(
+        ['int', 'int', 'int', 'int', 'int'], sample, label_store, subtype, chan, num)
 
     # Try to get fs from the header file if it is not contained in the
     # annotation file
@@ -1378,10 +1389,10 @@ def proc_ann_bytes(filebytes, sampto):
             current_label_store = filebytes[bpi, 1] >> 2
 
         # Set defaults or carry over previous values if necessary
-        subtype, chan, num, aux_note = update_extra_fields(subtype, chan, num, aux_note, update)
+        update_extra_fields(subtype, chan, num, aux_note, update)
 
-        if sampto and sampto<sample_total:
-            sample, label_store, subtype, chan, num, aux_note = rm_last(sample, label_store, subtype, chan, num, aux_note)
+        if sampto and sampto < sample_total:
+            rm_last(sample, label_store, subtype, chan, num, aux_note)
             break
 
     return sample, label_store, subtype, chan, num, aux_note
@@ -1486,8 +1497,6 @@ def update_extra_fields(subtype, chan, num, aux_note, update):
     if update['aux_note']:
         aux_note.append('')
 
-    return subtype, chan, num, aux_note
-
 
 rx_fs = re.compile("## time resolution: (?P<fs>\d+\.?\d*)")
 rx_custom_label = re.compile("(?P<label_store>\d+) (?P<symbol>\S+) (?P<description>.+)")
@@ -1571,21 +1580,21 @@ def rm_empty_indices(*args):
 
     return [[a[i] for i in keep_inds] for a in args[1:]]
 
-def lists_to_int_arrays(*args):
+def lists_to_arrays(dtypes, *args):
     """
-    Convert lists to numpy int arrays
+    Convert lists to numpy arrays. `dtypes` is a list of string dtypes.
     """
-    return [np.array(a, dtype='int') for a in args]
+    return_args = []
+    for i in range(len(dtypes)):
+        return_args.append(np.array(args[i], dtype=dtypes[i]))
+    return return_args
 
 def rm_last(*args):
     """
-    Remove the last index from each list
+    Pop each list
     """
-    if len(args) == 1:
-        return args[:-1]
-    else:
-        return [a[:-1] for a in args]
-    return
+    for a in args:
+        a.pop()
 
 ## ------------- Annotation Field Specifications ------------- ##
 
