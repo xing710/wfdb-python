@@ -168,7 +168,7 @@ class Annotation(object):
 
         present_label_fields = self.get_label_fields()
         if not present_label_fields:
-            raise Exception('At least one annotation label field is required to write the annotation: ', ann_label_fields)
+            raise Exception('At least one annotation label field is required to write the annotation: ', ANN_LABEL_FIELDS)
 
         # Check the validity of individual fields
         self.check_fields()
@@ -197,7 +197,7 @@ class Annotation(object):
         Get the present label fields in the object
         """
         present_label_fields = []
-        for field in ann_label_fields:
+        for field in ANN_LABEL_FIELDS:
             if getattr(self, field) is not None:
                 present_label_fields.append(field)
 
@@ -391,7 +391,7 @@ class Annotation(object):
     def standardize_custom_labels(self):
         """
         Set the custom_labels field of the object to a standardized format:
-        3 column pandas df with ann_label_fields as columns.
+        3 column pandas df with ANN_LABEL_FIELDS as columns.
 
         Does nothing if there are no custom labels defined.
         Does nothing if custom_labels is already a df with all 3 columns
@@ -448,7 +448,7 @@ class Annotation(object):
             custom_labels['label_store'] = available_label_stores[:n_custom_labels]
 
         custom_labels.set_index(custom_labels['label_store'].values, inplace=True)
-        custom_labels = custom_labels[list(ann_label_fields)]
+        custom_labels = custom_labels[list(ANN_LABEL_FIELDS)]
 
         self.custom_labels = custom_labels
 
@@ -459,7 +459,7 @@ class Annotation(object):
         Get the label_store values not defined in the
         standard wfdb annotation labels.
         """
-        return list(set(range(50)) - set(ann_label_table['label_store']))
+        return list(set(range(50)) - set(ANN_LABELS['label_store']))
 
 
     def get_available_label_stores(self, usefield='tryall'):
@@ -490,7 +490,7 @@ class Annotation(object):
             elif self.description is not None:
                 usefield = 'description'
             else:
-                raise ValueError('No label fields are defined. At least one of the following is required: ', ann_label_fields)
+                raise ValueError('No label fields are defined. At least one of the following is required: ', ANN_LABEL_FIELDS)
             return self.get_available_label_stores(usefield = usefield)
         # Use the explicitly stated field to get available stores.
         else:
@@ -501,22 +501,22 @@ class Annotation(object):
 
             # Get the unused label_store values
             if usefield == 'label_store':
-                unused_label_stores = set(ann_label_table['label_store'].values) - contained_field
+                unused_label_stores = set(ANN_LABELS['label_store'].values) - contained_field
             else:
                 # the label_store values from the standard wfdb annotation labels
                 # whose symbols are not contained in this annotation
-                unused_field = set(ann_label_table[usefield].values) - contained_field
-                unused_label_stores = ann_label_table.loc[ann_label_table[usefield] in unused_field, 'label_store'].values
+                unused_field = set(ANN_LABELS[usefield].values) - contained_field
+                unused_label_stores = ANN_LABELS.loc[ANN_LABELS[usefield] in unused_field, 'label_store'].values
 
             # Get the standard wfdb label_store values overwritten by the
             # custom_labels if any
             if self.custom_symbols is not None:
                 custom_field = set(self.get_custom_label_attribute(usefield))
                 if usefield == 'label_store':
-                    overwritten_label_stores = set(custom_field).intersection(set(ann_label_table['label_store']))
+                    overwritten_label_stores = set(custom_field).intersection(set(ANN_LABELS['label_store']))
                 else:
-                    overwritten_fields = set(custom_field).intersection(set(ann_label_table[usefield]))
-                    overwritten_label_stores = ann_label_table.loc[ann_label_table[usefield] in overwritten_fields, 'label_store'].values
+                    overwritten_fields = set(custom_field).intersection(set(ANN_LABELS[usefield]))
+                    overwritten_label_stores = ANN_LABELS.loc[ANN_LABELS[usefield] in overwritten_fields, 'label_store'].values
             else:
                 overwritten_label_stores = set()
 
@@ -538,7 +538,7 @@ class Annotation(object):
         a number of formats
         """
 
-        if attribute not in ann_label_fields:
+        if attribute not in ANN_LABEL_FIELDS:
             raise ValueError('Invalid attribute specified')
 
         if isinstance(self.custom_labels, pd.DataFrame):
@@ -566,13 +566,15 @@ class Annotation(object):
 
     def create_label_map(self, inplace=True):
         """
-        Creates mapping df based on ann_label_table and self.custom_labels.
+        Creates mapping df based on ANN_LABELS and self.custom_labels.
 
-        Table composed of entire WFDB standard annotation table, overwritten/appended
-        with custom_labels if any. Sets __label_map__ attribute, or returns value.
+        Table composed of entire WFDB standard annotation table
+        overwritten/appended with custom_labels if any.
+        Sets the __label_map__ attribute, or returns value.
+
         """
 
-        label_map =  ann_label_table.copy()
+        label_map =  ANN_LABELS.copy()
 
         if self.custom_labels is not None:
             self.standardize_custom_labels()
@@ -664,7 +666,7 @@ class Annotation(object):
         custom_bytes = []
 
         for i in self.custom_labels.index:
-            custom_bytes += custom_triplet_bytes(list(self.custom_labels.loc[i, list(ann_label_fields)]))
+            custom_bytes += custom_triplet_bytes(list(self.custom_labels.loc[i, list(ANN_LABEL_FIELDS)]))
 
         # writecontent = []
         # for i in range(len(self.custom_labels)):
@@ -804,7 +806,7 @@ class Annotation(object):
             self.check_field('custom_labels')
 
         # Create the label map
-        label_map = ann_label_table.copy()
+        label_map = ANN_LABELS.copy()
 
         # Convert the tuple triplets into a pandas dataframe if needed
         if isinstance(self.custom_labels, (list, tuple)):
@@ -863,7 +865,7 @@ class Annotation(object):
         # Figure out which desired label elements are missing
         missing_elements = [e for e in wanted_label_elements if getattr(self, e) is None]
 
-        contained_elements = [e for e in ann_label_fields if getattr(self, e )is not None]
+        contained_elements = [e for e in ANN_LABEL_FIELDS if getattr(self, e )is not None]
 
         if not contained_elements:
             raise Exception('No annotation labels contained in object')
@@ -871,7 +873,7 @@ class Annotation(object):
         for e in missing_elements:
             self.convert_label_attribute(contained_elements[0], e)
 
-        unwanted_label_elements = list(set(ann_label_fields)
+        unwanted_label_elements = list(set(ANN_LABEL_FIELDS)
                                        - set(wanted_label_elements))
 
         self.rm_attributes(unwanted_label_elements)
@@ -885,24 +887,35 @@ class Annotation(object):
             setattr(self, a, None)
         return
 
-    def convert_label_attribute(self, source_field, target_field, inplace=True,
-                                overwrite=True):
+    def convert_label_attribute(self, source_field, target_field,
+                                inplace=True, overwrite=True):
         """
-        Convert one label attribute (label_store, symbol, or description) to another.
-        Input arguments:
-        - inplace - If True, sets the object attribute. If False, returns the value.
-        - overwrite - if True, performs conversion and replaces target field attribute even if the
-          target attribute already has a value. If False, does not perform conversion in the aforementioned case.
-          Set to True (do conversion) if inplace=False.
+        Convert one label attribute (label_store, symbol, or
+        description) to another. Creates a mapping df on the fly based
+        on ANN_LABELS and self.custom_labels
 
-        Creates mapping df on the fly based on ann_label_table and self.custom_labels
+        Parameters
+        ----------
+        source_field : str
+            The source label attribute.
+        target_field : str
+            The destination label attribute
+        inplace : bool
+            Whether to set the object attribute, or return the value.
+        overwrite : bool
+            If True, performs conversion and replaces target field
+            attribute even if the target attribute already has a value.
+            If False, does not perform conversion in the aforementioned
+            case. Set to True (do conversion) if inplace=False.
+
         """
         if inplace and not overwrite:
             if getattr(self, target_field) is not None:
                 return
 
         label_map = self.create_label_map(inplace=False)
-        label_map.set_index(label_map[source_field].values, inplace=True)
+        pdb.set_trace()
+        label_map.set_index(source_field, inplace=True)
 
         target_item = label_map.loc[getattr(self, source_field), target_field].values
 
@@ -923,8 +936,6 @@ class Annotation(object):
         df = pd.DataFrame()
 
 
-
-
 def label_triplets_to_df(triplets):
     """
     Get a pd dataframe from a tuple triplets
@@ -940,7 +951,7 @@ def label_triplets_to_df(triplets):
                              'description':[t[2] for t in triplets]})
 
     label_df.set_index(label_df['label_store'].values, inplace=True)
-    label_df = label_df[list(ann_label_fields)]
+    label_df = label_df[list(ANN_LABEL_FIELDS)]
 
     return label_df
 
@@ -1014,7 +1025,7 @@ def field2bytes(field, value):
     # samp and sym bytes come together
     if field == 'samptype':
         # Numerical value encoding annotation symbol
-        typecode = ann_label_table.loc[ann_label_table['symbol']==value[1], 'label_store'].values[0]
+        typecode = ANN_LABELS.loc[ANN_LABELS['symbol']==value[1], 'label_store'].values[0]
 
         # sample difference
         sd = value[0]
@@ -1180,22 +1191,21 @@ def show_ann_labels():
     >>> show_ann_labels()
 
     """
-    print(ann_label_table)
+    print(ANN_LABELS)
 
 
 def show_ann_classes():
     """
-    Display the standard wfdb annotation classes
+    Display the standard wfdb annotation file extensions.
 
     Examples
     --------
     >>> show_ann_classes()
 
     """
-    print(ann_class_table)
+    print(ANN_EXTENSIONS)
 
 
-# todo: return as df option?
 def rdann(record_name, extension, sampfrom=0, sampto=None, shift_samps=False,
           pb_dir=None, return_label_elements=['symbol'],
           summarize_labels=False):
@@ -1328,7 +1338,7 @@ def check_read_inputs(sampfrom, sampto, return_label_elements):
     if isinstance(return_label_elements, str):
         return_label_elements = [return_label_elements]
 
-    if set.union(set(ann_label_fields), set(return_label_elements))!=set(ann_label_fields):
+    if set.union(set(ANN_LABEL_FIELDS), set(return_label_elements))!=set(ANN_LABEL_FIELDS):
         raise ValueError('return_label_elements must be a list containing one or more of the following elements:',label_types)
 
     return return_label_elements
@@ -1382,10 +1392,8 @@ def proc_ann_bytes(filebytes, sampto):
         current_label_store = filebytes[bpi, 1] >> 2
 
         while (current_label_store > 59):
-            subtype, chan, num, aux_note, update, bpi = proc_extra_field(current_label_store, filebytes,
-                                                                         bpi, subtype, chan, num,
-                                                                         aux_note, update)
-
+            update, bpi = proc_extra_field(current_label_store, filebytes, bpi,
+                subtype, chan, num, aux_note, update)
             current_label_store = filebytes[bpi, 1] >> 2
 
         # Set defaults or carry over previous values if necessary
@@ -1464,11 +1472,11 @@ def proc_extra_field(label_store, filebytes, bpi, subtype, chan, num, aux_note, 
         if aux_notelen & 1:
             aux_notebytes = aux_notebytes[:-1]
         # The aux_note string
-        aux_note.append("".join([chr(char) for char in aux_notebytes]))
+        aux_note.append(''.join([chr(char) for char in aux_notebytes]))
         update['aux_note'] = False
         bpi = bpi + 1 + int(np.ceil(aux_notelen / 2.))
 
-    return subtype, chan, num, aux_note, update, bpi
+    return update, bpi
 
 
 def update_extra_fields(subtype, chan, num, aux_note, update):
@@ -1657,113 +1665,74 @@ ALLOWED_TYPES = {'record_name': (str), 'extension': (str),
 str_types = (str, np.str_)
 
 # Elements of the annotation label
-ann_label_fields = ('label_store', 'symbol', 'description')
+ANN_LABEL_FIELDS = ('label_store', 'symbol', 'description')
 
 
-class AnnotationClass(object):
-    def __init__(self, extension, description, human_reviewed):
+# Standard annotation file extensions
+ANN_EXTENSIONS = pd.DataFrame(data=[
+    ('atr', 'Reference ECG annotations', True),
 
-        self.extension = extension
-        self.description = description
-        self.human_reviewed = human_reviewed
+    ('blh', 'Human reviewed beat labels', True),
+    ('blm', 'Machine beat labels', False),
 
+    ('alh', 'Human reviewed alarms', True),
+    ('alm', 'Machine alarms', False),
 
-ann_classes = [
-    AnnotationClass('atr', 'Reference ECG annotations', True),
+    ('qrsc', 'Human reviewed qrs detections', True),
+    ('qrs', 'Machine QRS detections', False),
 
-    AnnotationClass('blh', 'Human reviewed beat labels', True),
-    AnnotationClass('blm', 'Machine beat labels', False),
-
-    AnnotationClass('alh', 'Human reviewed alarms', True),
-    AnnotationClass('alm', 'Machine alarms', False),
-
-    AnnotationClass('qrsc', 'Human reviewed qrs detections', True),
-    AnnotationClass('qrs', 'Machine QRS detections', False),
-
-    AnnotationClass('bph', 'Human reviewed BP beat detections', True),
-    AnnotationClass('bpm', 'Machine BP beat detections', False),
+    ('bph', 'Human reviewed BP beat detections', True),
+    ('bpm', 'Machine BP beat detections', False),
 
     #AnnotationClass('alh', 'Human reviewed BP alarms', True),
     #AnnotationClass('alm', 'Machine BP alarms', False),
     # separate ecg and other signal category alarms?
     # Can we use signum to determine the channel it was triggered off?
-
-    #ppg alarms?
-    #eeg alarms?
-]
-
-ann_class_table = pd.DataFrame({'extension':[ac.extension for ac in ann_classes], 'description':[ac.description for ac in ann_classes],
-                                 'human_reviewed':[ac.human_reviewed for ac in ann_classes]})
-ann_class_table.set_index(ann_class_table['extension'].values, inplace=True)
-ann_class_table = ann_class_table[['extension', 'description', 'human_reviewed']]
-
-# Individual annotation labels
-class AnnotationLabel(object):
-    def __init__(self, label_store, symbol, short_description, description):
-        self.label_store = label_store
-        self.symbol = symbol
-        self.short_description = short_description
-        self.description = description
-
-    def __str__(self):
-        return str(self.label_store)+', '+str(self.symbol)+', '+str(self.short_description)+', '+str(self.description)
-
-ann_labels = [
-    AnnotationLabel(0, " ", 'NOTANN', 'Not an actual annotation'),
-    AnnotationLabel(1, "N", 'NORMAL', 'Normal beat'),
-    AnnotationLabel(2, "L", 'LBBB', 'Left bundle branch block beat'),
-    AnnotationLabel(3, "R", 'RBBB', 'Right bundle branch block beat'),
-    AnnotationLabel(4, "a", 'ABERR', 'Aberrated atrial premature beat'),
-    AnnotationLabel(5, "V", 'PVC', 'Premature ventricular contraction'),
-    AnnotationLabel(6, "F", 'FUSION', 'Fusion of ventricular and normal beat'),
-    AnnotationLabel(7, "J", 'NPC', 'Nodal (junctional) premature beat'),
-    AnnotationLabel(8, "A", 'APC', 'Atrial premature contraction'),
-    AnnotationLabel(9, "S", 'SVPB', 'Premature or ectopic supraventricular beat'),
-    AnnotationLabel(10, "E", 'VESC', 'Ventricular escape beat'),
-    AnnotationLabel(11, "j", 'NESC', 'Nodal (junctional) escape beat'),
-    AnnotationLabel(12, "/", 'PACE', 'Paced beat'),
-    AnnotationLabel(13, "Q", 'UNKNOWN', 'Unclassifiable beat'),
-    AnnotationLabel(14, "~", 'NOISE', 'Signal quality change'),
-    # AnnotationLabel(15, None, None, None),
-    AnnotationLabel(16, "|", 'ARFCT',  'Isolated QRS-like artifact'),
-    # AnnotationLabel(17, None, None, None),
-    AnnotationLabel(18, "s", 'STCH',  'ST change'),
-    AnnotationLabel(19, "T", 'TCH',  'T-wave change'),
-    AnnotationLabel(20, "*", 'SYSTOLE',  'Systole'),
-    AnnotationLabel(21, "D", 'DIASTOLE',  'Diastole'),
-    AnnotationLabel(22, '"', 'NOTE',  'Comment annotation'),
-    AnnotationLabel(23, "=", 'MEASURE',  'Measurement annotation'),
-    AnnotationLabel(24, "p", 'PWAVE',  'P-wave peak'),
-    AnnotationLabel(25, "B", 'BBB',  'Left or right bundle branch block'),
-    AnnotationLabel(26, "^", 'PACESP',  'Non-conducted pacer spike'),
-    AnnotationLabel(27, "t", 'TWAVE',  'T-wave peak'),
-    AnnotationLabel(28, "+", 'RHYTHM',  'Rhythm change'),
-    AnnotationLabel(29, "u", 'UWAVE',  'U-wave peak'),
-    AnnotationLabel(30, "?", 'LEARN',  'Learning'),
-    AnnotationLabel(31, "!", 'FLWAV',  'Ventricular flutter wave'),
-    AnnotationLabel(32, "[", 'VFON',  'Start of ventricular flutter/fibrillation'),
-    AnnotationLabel(33, "]", 'VFOFF',  'End of ventricular flutter/fibrillation'),
-    AnnotationLabel(34, "e", 'AESC',  'Atrial escape beat'),
-    AnnotationLabel(35, "n", 'SVESC',  'Supraventricular escape beat'),
-    AnnotationLabel(36, "@", 'LINK',  'Link to external data (aux_note contains URL)'),
-    AnnotationLabel(37, "x", 'NAPC',  'Non-conducted P-wave (blocked APB)'),
-    AnnotationLabel(38, "f", 'PFUS',  'Fusion of paced and normal beat'),
-    AnnotationLabel(39, "(", 'WFON',  'Waveform onset'),
-    AnnotationLabel(40, ")", 'WFOFF',  'Waveform end'),
-    AnnotationLabel(41, "r", 'RONT',  'R-on-T premature ventricular contraction'),
-    # AnnotationLabel(42, None, None, None),
-    # AnnotationLabel(43, None, None, None),
-    # AnnotationLabel(44, None, None, None),
-    # AnnotationLabel(45, None, None, None),
-    # AnnotationLabel(46, None, None, None),
-    # AnnotationLabel(47, None, None, None),
-    # AnnotationLabel(48, None, None, None),
-    # AnnotationLabel(49, None, None, None),
-]
+    ], columns=['extension', 'description', 'human_reviewed']
+)
 
 
-ann_label_table = pd.DataFrame({'label_store':np.array([al.label_store for al in ann_labels], dtype='int'), 'symbol':[al.symbol for al in ann_labels],
-                               'description':[al.description for al in ann_labels]})
-ann_label_table.set_index(ann_label_table['label_store'].values, inplace=True)
-ann_label_table = ann_label_table[['label_store','symbol','description']]
-
+# The standard library annotation label map
+ANN_LABELS = pd.DataFrame(data=[
+    (0, ' ', 'NOTANN', 'Not an actual annotation'),
+    (1, 'N', 'NORMAL', 'Normal beat'),
+    (2, 'L', 'LBBB', 'Left bundle branch block beat'),
+    (3, 'R', 'RBBB', 'Right bundle branch block beat'),
+    (4, 'a', 'ABERR', 'Aberrated atrial premature beat'),
+    (5, 'V', 'PVC', 'Premature ventricular contraction'),
+    (6, 'F', 'FUSION', 'Fusion of ventricular and normal beat'),
+    (7, 'J', 'NPC', 'Nodal (junctional) premature beat'),
+    (8, 'A', 'APC', 'Atrial premature contraction'),
+    (9, 'S', 'SVPB', 'Premature or ectopic supraventricular beat'),
+    (10, 'E', 'VESC', 'Ventricular escape beat'),
+    (11, 'j', 'NESC', 'Nodal (junctional) escape beat'),
+    (12, '/', 'PACE', 'Paced beat'),
+    (13, 'Q', 'UNKNOWN', 'Unclassifiable beat'),
+    (14, '~', 'NOISE', 'Signal quality change'),
+    (16, '|', 'ARFCT',  'Isolated QRS-like artifact'),
+    (18, 's', 'STCH',  'ST change'),
+    (19, 'T', 'TCH',  'T-wave change'),
+    (20, '*', 'SYSTOLE',  'Systole'),
+    (21, 'D', 'DIASTOLE',  'Diastole'),
+    (22, '"', 'NOTE',  'Comment annotation'),
+    (23, '=', 'MEASURE',  'Measurement annotation'),
+    (24, 'p', 'PWAVE',  'P-wave peak'),
+    (25, 'B', 'BBB',  'Left or right bundle branch block'),
+    (26, '^', 'PACESP',  'Non-conducted pacer spike'),
+    (27, 't', 'TWAVE',  'T-wave peak'),
+    (28, '+', 'RHYTHM',  'Rhythm change'),
+    (29, 'u', 'UWAVE',  'U-wave peak'),
+    (30, '?', 'LEARN',  'Learning'),
+    (31, '!', 'FLWAV',  'Ventricular flutter wave'),
+    (32, '[', 'VFON',  'Start of ventricular flutter/fibrillation'),
+    (33, ']', 'VFOFF',  'End of ventricular flutter/fibrillation'),
+    (34, 'e', 'AESC',  'Atrial escape beat'),
+    (35, 'n', 'SVESC',  'Supraventricular escape beat'),
+    (36, '@', 'LINK',  'Link to external data (aux_note contains URL)'),
+    (37, 'x', 'NAPC',  'Non-conducted P-wave (blocked APB)'),
+    (38, 'f', 'PFUS',  'Fusion of paced and normal beat'),
+    (39, '(', 'WFON',  'Waveform onset'),
+    (40, ')', 'WFOFF',  'Waveform end'),
+    (41, 'r', 'RONT',  'R-on-T premature ventricular contraction'),
+    ], columns=['label_store', 'symbol', 'short_description', 'description']
+)
