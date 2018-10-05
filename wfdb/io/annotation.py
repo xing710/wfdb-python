@@ -914,7 +914,6 @@ class Annotation(object):
                 return
 
         label_map = self.create_label_map(inplace=False)
-        pdb.set_trace()
         label_map.set_index(source_field, inplace=True)
 
         target_item = label_map.loc[getattr(self, source_field), target_field].values
@@ -930,10 +929,14 @@ class Annotation(object):
 
     def to_df(self):
         """
-        Convert annotation object to a pandas dataframe
+        Create a pandas DataFrame from the Annotation object
 
         """
-        df = pd.DataFrame()
+        df = pd.DataFrame(data={'sample':self.sample, 'symbol':self.symbol,
+            'subtype':self.subtype, 'chan':self.chan, 'num':self.num,
+            'aux_note':self.aux_note}, columns=['sample', 'symbol', 'subtype',
+            'chan', 'aux_note'])
+        return df
 
 
 def label_triplets_to_df(triplets):
@@ -1208,7 +1211,7 @@ def show_ann_classes():
 
 def rdann(record_name, extension, sampfrom=0, sampto=None, shift_samps=False,
           pb_dir=None, return_label_elements=['symbol'],
-          summarize_labels=False):
+          summarize_labels=False, return_df=False):
     """
     Read a WFDB annotation file record_name.extension and return an
     Annotation object.
@@ -1242,6 +1245,8 @@ def rdann(record_name, extension, sampfrom=0, sampto=None, shift_samps=False,
         contained in the file to the 'contained_labels' attribute of the
         returned object. This table will contain the columns:
         ['label_store', 'symbol', 'description', 'n_occurences']
+    return_df : bool, optional
+        Whether to return a pandas DataFrame instead of a wfdb Annotation.
 
     Returns
     -------
@@ -1324,6 +1329,9 @@ def rdann(record_name, extension, sampfrom=0, sampto=None, shift_samps=False,
 
     # Set/unset the desired label values
     annotation.set_label_elements(return_label_elements)
+
+    if return_df:
+        annotation = annotation.to_df()
 
     return annotation
 
