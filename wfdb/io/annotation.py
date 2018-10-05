@@ -15,16 +15,16 @@ class Annotation(object):
     """
     The class representing WFDB annotations.
 
-    Annotation objects can be created using the initializer, or by reading a
-    WFDB annotation file with `rdann`.
+    Annotation objects can be created using the initializer, or by
+    reading a WFDB annotation file with `rdann`.
 
     The attributes of the Annotation object give information about the
     annotation as specified by:
     https://www.physionet.org/physiotools/wag/annot-5.htm
 
-    Call `show_ann_labels()` to see the list of standard annotation codes. Any
-    text used to label annotations that are not one of these codes should go in
-    the 'aux_note' field rather than the 'sym' field.
+    Call `show_ann_labels()` to see the list of standard annotation
+    codes. Any text used to label annotations that are not one of these
+    codes should go in the 'aux_note' field rather than the 'sym' field.
 
     Examples
     --------
@@ -33,11 +33,15 @@ class Annotation(object):
                                aux_note=[None, None, 'Serious Vfib'])
 
     """
+    # The data fields for each individual annotation
+    DATA_FIELDS = ['sample', 'symbol', 'subtype', 'chan', 'num',
+        'aux_note', 'label_store', 'description']
+
 
     def __init__(self, record_name, extension, sample, symbol=None,
-                 subtype=None, chan=None, num=None, aux_note=None, fs=None,
-                 label_store=None, description=None, custom_labels=None,
-                 contained_labels=None):
+                 subtype=None, chan=None, num=None, aux_note=None,
+                 fs=None, label_store=None, description=None,
+                 custom_labels=None):
         """
         Parameters
         ----------
@@ -47,19 +51,19 @@ class Annotation(object):
         extension : str
             The file extension of the file the annotation is stored in.
         sample : numpy array
-            A numpy array containing the annotation locations in samples relative to
-            the beginning of the record.
-        symbol : list, or numpy array, optional
-            The symbols used to display the annotation labels. List or numpy array.
-            If this field is present, `label_store` must not be present.
+            A numpy array containing the annotation locations in samples
+            relative to the beginning of the record.
+        symbol : numpy array, optional
+            The symbols used to display the annotation labels.
         subtype : numpy array, optional
-            A numpy array containing the marked class/category of each annotation.
+            A numpy array containing the marked class/category of each
+            annotation.
         chan : numpy array, optional
-            A numpy array containing the signal channel associated with each
-            annotation.
+            A numpy array containing the signal channel associated with
+            each annotation.
         num : numpy array, optional
-            A numpy array containing the labelled annotation number for each
-            annotation.
+            A numpy array containing the labelled annotation number for
+            each annotation.
         aux_note : list, optional
             A list containing the auxiliary information string (or None for
             annotations without notes) for each annotation.
@@ -74,9 +78,6 @@ class Annotation(object):
             the relationship between the three label fields. The data type is a
             pandas DataFrame with three columns:
             ['label_store', 'symbol', 'description']
-        contained_labels : pandas dataframe, optional
-            The unique labels contained in this annotation. Same structure as
-            `custom_labels`.
 
         """
         self.record_name = record_name
@@ -97,9 +98,6 @@ class Annotation(object):
         self.custom_labels = custom_labels
         self.contained_labels = contained_labels
 
-        self.ann_len = len(self.sample)
-
-        #__label_map__: (storevalue, symbol, description) hidden attribute
 
     # Equal comparison operator for objects of this type
     def __eq__(self, other):
@@ -149,8 +147,6 @@ class Annotation(object):
             setattr(self, field, getattr(self, field)[kept_inds])
 
         self.aux_note = [self.aux_note[i] for i in kept_inds]
-
-        self.ann_len = len(self.sample)
 
     def wrann(self, write_fs=False, write_dir=''):
         """
@@ -203,16 +199,15 @@ class Annotation(object):
 
         return present_label_fields
 
-    # Check the set fields of the annotation object
+
     def check_fields(self):
-        # Check all set fields
+        """
+        Check the set fields of the annotation object
+        """
         for field in ALLOWED_TYPES:
-            if getattr(self, field) is not None:
-                # Check the type of the field's elements
+            if hasattr(self, field):
                 self.check_field(field)
         return
-
-
 
     def check_field(self, field):
         """
@@ -648,9 +643,11 @@ class Annotation(object):
 
         return np.array(data_bytes).astype('u1')
 
-    # Calculate the bytes written to the annotation file for the
-    # custom_labels field
     def calc_cl_bytes(self):
+        """
+        Calculate the bytes written to the annotation file for the
+        custom_labels field
+        """
 
         if self.custom_labels is None:
             return []
@@ -675,7 +672,7 @@ class Annotation(object):
         # custombytes = [customcode2bytes(triplet) for triplet in writecontent]
         # custombytes = [item for sublist in custombytes for item in sublist]
 
-        return np.array(headbytes+custom_bytes+tailbytes).astype('u1')
+        return np.array(headbytes + custom_bytes + tailbytes).astype('u1')
 
     def calc_core_bytes(self):
         """
@@ -687,13 +684,13 @@ class Annotation(object):
         else:
             sampdiff = np.concatenate(([self.sample[0]], np.diff(self.sample)))
 
-        # Create a copy of the annotation object with a
-        # compact version of fields to write
+        # Create a copy of the annotation object with a compact version
+        # of fields to write
         compact_annotation = copy.deepcopy(self)
-        compact_annotation.compact_fields()
+        compact_annotation._compact_fields()
 
-
-        # The optional fields to be written. Write if they are not None or all empty
+        # The optional fields to be written. Write if they are not None
+        # or all empty
         extra_write_fields = []
 
         for field in ['num', 'subtype', 'chan', 'aux_note']:
@@ -721,7 +718,7 @@ class Annotation(object):
 
     # Compact all of the object's fields so that the output
     # writing annotation file writes as few bytes as possible
-    def compact_fields(self):
+    def _compact_fields(self):
 
         # Number of annotations
         nannots = len(self.sample)
@@ -785,7 +782,7 @@ class Annotation(object):
     def get_contained_labels(self, inplace=True):
         """
         Get the set of unique labels contained in this annotation.
-        Returns a pandas dataframe or sets the __contained__ labels
+        Returns a pandas dataframe or sets the contained_labels
         attribute of the object.
 
 
@@ -876,15 +873,18 @@ class Annotation(object):
         unwanted_label_elements = list(set(ANN_LABEL_FIELDS)
                                        - set(wanted_label_elements))
 
-        self.rm_attributes(unwanted_label_elements)
+        self._rm_attributes(unwanted_label_elements)
 
         return
 
-    def rm_attributes(self, attributes):
+    def _rm_attributes(self, attributes):
+        """
+        Remove the specified attributes from the object.
+        """
         if isinstance(attributes, str):
             attributes = [attributes]
         for a in attributes:
-            setattr(self, a, None)
+            delattr(self, a)
         return
 
     def convert_label_attribute(self, source_field, target_field,
@@ -1187,7 +1187,20 @@ def wrann(record_name, extension, sample, symbol=None, subtype=None, chan=None,
 
 def show_ann_labels():
     """
-    Display the standard wfdb annotation label mapping.
+    Display the standard wfdb annotation label mapping table.
+
+    When writing WFDB annotation files, please adhere to these standards
+    for all annotation definitions present in this table, and define the
+    `custom_labels` field for items that are not present.
+
+    Columns
+    -------
+    label_store :
+        The integer values used to store the labels in the file.
+    symbol :
+        The symbol used to display each label.
+    description :
+        The full description of what each label means.
 
     Examples
     --------
@@ -1199,7 +1212,20 @@ def show_ann_labels():
 
 def show_ann_classes():
     """
-    Display the standard wfdb annotation file extensions.
+    Display the standard WFDB annotation file extensions and their
+    meanings.
+
+    When writing WFDB annotation files, please adhere to these
+    standards.
+
+    Columns
+    -------
+    extension :
+        The file extension.
+    description :
+        The description of the annotation content.
+    human_reviewed :
+        Whether the annotations were reviewed by humans.
 
     Examples
     --------
@@ -1208,9 +1234,10 @@ def show_ann_classes():
     """
     print(ANN_EXTENSIONS)
 
+['sample', 'symbol', 'subtype', 'chan', 'num', 'aux_note', 'label_store', 'description']
 
 def rdann(record_name, extension, sampfrom=0, sampto=None, shift_samps=False,
-          pb_dir=None, return_label_elements=['symbol'],
+          pb_dir=None, data_fields=Annotation.DATA_FIELDS,
           summarize_labels=False, return_df=False):
     """
     Read a WFDB annotation file record_name.extension and return an
@@ -1676,7 +1703,7 @@ str_types = (str, np.str_)
 ANN_LABEL_FIELDS = ('label_store', 'symbol', 'description')
 
 
-# Standard annotation file extensions
+# Standard WFDB annotation file extensions
 ANN_EXTENSIONS = pd.DataFrame(data=[
     ('atr', 'Reference ECG annotations', True),
 
@@ -1702,45 +1729,50 @@ ANN_EXTENSIONS = pd.DataFrame(data=[
 
 # The standard library annotation label map
 ANN_LABELS = pd.DataFrame(data=[
-    (0, ' ', 'NOTANN', 'Not an actual annotation'),
-    (1, 'N', 'NORMAL', 'Normal beat'),
-    (2, 'L', 'LBBB', 'Left bundle branch block beat'),
-    (3, 'R', 'RBBB', 'Right bundle branch block beat'),
-    (4, 'a', 'ABERR', 'Aberrated atrial premature beat'),
-    (5, 'V', 'PVC', 'Premature ventricular contraction'),
-    (6, 'F', 'FUSION', 'Fusion of ventricular and normal beat'),
-    (7, 'J', 'NPC', 'Nodal (junctional) premature beat'),
-    (8, 'A', 'APC', 'Atrial premature contraction'),
-    (9, 'S', 'SVPB', 'Premature or ectopic supraventricular beat'),
-    (10, 'E', 'VESC', 'Ventricular escape beat'),
-    (11, 'j', 'NESC', 'Nodal (junctional) escape beat'),
-    (12, '/', 'PACE', 'Paced beat'),
-    (13, 'Q', 'UNKNOWN', 'Unclassifiable beat'),
-    (14, '~', 'NOISE', 'Signal quality change'),
-    (16, '|', 'ARFCT',  'Isolated QRS-like artifact'),
-    (18, 's', 'STCH',  'ST change'),
-    (19, 'T', 'TCH',  'T-wave change'),
-    (20, '*', 'SYSTOLE',  'Systole'),
-    (21, 'D', 'DIASTOLE',  'Diastole'),
-    (22, '"', 'NOTE',  'Comment annotation'),
-    (23, '=', 'MEASURE',  'Measurement annotation'),
-    (24, 'p', 'PWAVE',  'P-wave peak'),
-    (25, 'B', 'BBB',  'Left or right bundle branch block'),
-    (26, '^', 'PACESP',  'Non-conducted pacer spike'),
-    (27, 't', 'TWAVE',  'T-wave peak'),
-    (28, '+', 'RHYTHM',  'Rhythm change'),
-    (29, 'u', 'UWAVE',  'U-wave peak'),
-    (30, '?', 'LEARN',  'Learning'),
-    (31, '!', 'FLWAV',  'Ventricular flutter wave'),
-    (32, '[', 'VFON',  'Start of ventricular flutter/fibrillation'),
-    (33, ']', 'VFOFF',  'End of ventricular flutter/fibrillation'),
-    (34, 'e', 'AESC',  'Atrial escape beat'),
-    (35, 'n', 'SVESC',  'Supraventricular escape beat'),
-    (36, '@', 'LINK',  'Link to external data (aux_note contains URL)'),
-    (37, 'x', 'NAPC',  'Non-conducted P-wave (blocked APB)'),
-    (38, 'f', 'PFUS',  'Fusion of paced and normal beat'),
-    (39, '(', 'WFON',  'Waveform onset'),
-    (40, ')', 'WFOFF',  'Waveform end'),
-    (41, 'r', 'RONT',  'R-on-T premature ventricular contraction'),
-    ], columns=['label_store', 'symbol', 'short_description', 'description']
+    # 0 is used in the file as an indicator flag.
+    # (0, ' ', 'Not an actual annotation'),
+    (1, 'N', 'Normal beat'),
+    (2, 'L', 'Left bundle branch block beat'),
+    (3, 'R', 'Right bundle branch block beat'),
+    (4, 'a', 'Aberrated atrial premature beat'),
+    (5, 'V', 'Premature ventricular contraction'),
+    (6, 'F', 'Fusion of ventricular and normal beat'),
+    (7, 'J', 'Nodal (junctional) premature beat'),
+    (8, 'A', 'Atrial premature contraction'),
+    (9, 'S', 'Premature or ectopic supraventricular beat'),
+    (10, 'E', 'Ventricular escape beat'),
+    (11, 'j', 'Nodal (junctional) escape beat'),
+    (12, '/', 'Paced beat'),
+    (13, 'Q', 'Unclassifiable beat'),
+    (14, '~', 'Signal quality change'),
+    (16, '|', 'Isolated QRS-like artifact'),
+    (18, 's', 'ST change'),
+    (19, 'T', 'T-wave change'),
+    (20, '*', 'Systole'),
+    (21, 'D', 'Diastole'),
+    (22, '"', 'Comment annotation'),
+    (23, '=', 'Measurement annotation'),
+    (24, 'p', 'P-wave peak'),
+    (25, 'B', 'Left or right bundle branch block'),
+    (26, '^', 'Non-conducted pacer spike'),
+    (27, 't', 'T-wave peak'),
+    (28, '+', 'Rhythm change'),
+    (29, 'u', 'U-wave peak'),
+    (30, '?', 'Learning'),
+    (31, '!', 'Ventricular flutter wave'),
+    (32, '[', 'Start of ventricular flutter/fibrillation'),
+    (33, ']', 'End of ventricular flutter/fibrillation'),
+    (34, 'e', 'Atrial escape beat'),
+    (35, 'n', 'Supraventricular escape beat'),
+    (36, '@', 'Link to external data (aux_note contains URL)'),
+    (37, 'x', 'Non-conducted P-wave (blocked APB)'),
+    (38, 'f', 'Fusion of paced and normal beat'),
+    (39, '(', 'Waveform onset'),
+    (40, ')', 'Waveform end'),
+    (41, 'r', 'R-on-T premature ventricular contraction'),
+    ], columns=['label_store', 'symbol', 'description']
 )
+
+# The allowed integer range for the label_store value in wfdb
+# annotations. 0 is used to
+LABEL_RANGE = (1, 49)
