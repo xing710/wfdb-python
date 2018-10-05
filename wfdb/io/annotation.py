@@ -37,6 +37,9 @@ class Annotation(object):
     DATA_FIELDS = ['sample', 'symbol', 'subtype', 'chan', 'num',
         'aux_note', 'label_store', 'description']
 
+    # Information fields describing the entire annotation set
+    INFO_FIELDS = ['record_name', 'extension', 'fs', 'custom_labels']
+
 
     def __init__(self, record_name, extension, sample, symbol=None,
                  subtype=None, chan=None, num=None, aux_note=None,
@@ -46,8 +49,8 @@ class Annotation(object):
         Parameters
         ----------
         record_name : str
-            The base file name (without extension) of the record that the
-            annotation is associated with.
+            The base file name (without extension) of the record that
+            the annotation set is associated with.
         extension : str
             The file extension of the file the annotation is stored in.
         sample : numpy array
@@ -74,9 +77,9 @@ class Annotation(object):
         description : list, optional
             A list containing the descriptive string of each annotation label.
         custom_labels : pandas dataframe, optional
-            The custom annotation labels defined in the annotation file. Maps
-            the relationship between the three label fields. The data type is a
-            pandas DataFrame with three columns:
+            The custom annotation labels defined in the annotation file
+            Maps the relationship between the three label fields. The
+            DataFrame must have the three columns:
             ['label_store', 'symbol', 'description']
 
         """
@@ -361,11 +364,11 @@ class Annotation(object):
         with one another.
         """
         # Ensure all written annotation fields have the same length
-        nannots = len(self.sample)
+        n_annots = len(self.sample)
 
         for field in ['sample', 'num', 'subtype', 'chan', 'aux_note']+present_label_fields:
             if getattr(self, field) is not None:
-                if len(getattr(self, field)) != nannots:
+                if len(getattr(self, field)) != n_annots:
                     raise ValueError("The lengths of the 'sample' and '"+field+"' fields do not match")
 
         # Ensure all label fields are defined by the label map. This has to be checked because
@@ -607,15 +610,19 @@ class Annotation(object):
         # Write the file
         with open(os.path.join(write_dir, self.record_name+'.'+self.extension),
                   'wb') as f:
-            # Combine all bytes to write: fs (if any), custom annotations (if any), main content, file terminator
+            # Combine all bytes to write: fs (if any), custom
+            # annotations (if any), main content, file terminator
             np.concatenate((fs_bytes, cl_bytes, end_special_bytes, core_bytes,
                             np.array([0,0]))).astype('u1').tofile(f)
 
         return
 
-    # Calculate the bytes written to the annotation file for the fs field
     def calc_fs_bytes(self):
+        """
+        Calculate the bytes written to the annotation file for the fs
+        field
 
+        """
         if self.fs is None:
             return []
 
@@ -665,13 +672,6 @@ class Annotation(object):
         for i in self.custom_labels.index:
             custom_bytes += custom_triplet_bytes(list(self.custom_labels.loc[i, list(ANN_LABEL_FIELDS)]))
 
-        # writecontent = []
-        # for i in range(len(self.custom_labels)):
-        #     writecontent.append([freenumbers[i],list(custom_labels.keys())[i],list(custom_labels.values())[i]])
-
-        # custombytes = [customcode2bytes(triplet) for triplet in writecontent]
-        # custombytes = [item for sublist in custombytes for item in sublist]
-
         return np.array(headbytes + custom_bytes + tailbytes).astype('u1')
 
     def calc_core_bytes(self):
@@ -716,12 +716,14 @@ class Annotation(object):
 
         return data_bytes
 
-    # Compact all of the object's fields so that the output
-    # writing annotation file writes as few bytes as possible
-    def _compact_fields(self):
 
+    def _compact_fields(self):
+        """
+        Compact all of the object's fields so that the output
+        annotation file writes as few bytes as possible
+        """
         # Number of annotations
-        nannots = len(self.sample)
+        n_annots = len(self.sample)
 
         # Chan and num carry over previous fields. Get lists of as few
         # elements to write as possible
@@ -732,14 +734,14 @@ class Annotation(object):
         # num and sub are signed in original c package...
         if self.subtype is not None:
             if isinstance(self.subtype, list):
-                for i in range(nannots):
+                for i in range(n_annots):
                     if self.subtype[i] == 0:
                         self.subtype[i] = None
-                if np.array_equal(self.subtype, [None]*nannots):
+                if np.array_equal(self.subtype, [None]*n_annots):
                     self.subtype = None
             else:
                 zero_inds = np.where(self.subtype==0)[0]
-                if len(zero_inds) == nannots:
+                if len(zero_inds) == n_annots:
                     self.subtype = None
                 else:
                     self.subtype = list(self.subtype)
@@ -748,10 +750,10 @@ class Annotation(object):
 
         # Empty aux_note strings are not written
         if self.aux_note is not None:
-            for i in range(nannots):
+            for i in range(n_annots):
                 if self.aux_note[i] == '':
                     self.aux_note[i] = None
-            if np.array_equal(self.aux_note, [None]*nannots):
+            if np.array_equal(self.aux_note, [None]*n_annots):
                 self.aux_note = None
 
 
@@ -1234,60 +1236,64 @@ def show_ann_classes():
     """
     print(ANN_EXTENSIONS)
 
-['sample', 'symbol', 'subtype', 'chan', 'num', 'aux_note', 'label_store', 'description']
 
-def rdann(record_name, extension, sampfrom=0, sampto=None, shift_samps=False,
-          pb_dir=None, data_fields=Annotation.DATA_FIELDS,
+def rdann(record_name, extension, sampfrom=0, sampto=None,
+          shift_samps=False, pb_dir=None,
+          data_fields=Annotation.DATA_FIELDS[:6],
           summarize_labels=False, return_df=False):
     """
-    Read a WFDB annotation file record_name.extension and return an
-    Annotation object.
+    Read a WFDB annotation file named: <record_name>.<extension> and
+    return the information of the annotation set.
 
     Parameters
     ----------
     record_name : str
-        The record name of the WFDB annotation file. ie. for file '100.atr',
-        record_name='100'.
+        The record name of the WFDB annotation file. ie. for file
+        '100.atr', record_name='100'.
     extension : str
-        The annotatator extension of the annotation file. ie. for  file
+        The annotatator extension of the annotation file. ie. for file
         '100.atr', extension='atr'.
     sampfrom : int, optional
         The minimum sample number for annotations to be returned.
     sampto : int, optional
         The maximum sample number for annotations to be returned.
     shift_samps : bool, optional
-        Specifies whether to return the sample indices relative to `sampfrom`
-        (True), or sample 0 (False).
+        Specifies whether to return the sample indices relative to
+        `sampfrom` (True), or sample 0 (False).
     pb_dir : str, optional
         Option used to stream data from Physiobank. The Physiobank database
         directory from which to find the required annotation file. eg. For
         record '100' in 'http://physionet.org/physiobank/database/mitdb':
         pb_dir='mitdb'.
-    return_label_elements : list, optional
-        The label elements that are to be returned from reading the annotation
-        file. A list with at least one of the following options: 'symbol',
-        'label_store', 'description'.
+    data_fields : list, optional
+        The data elements that are to be returned. Must be a subset of
+        Annotation.DATA_FIELDS.
     summarize_labels : bool, optional
         If True, assign a summary table of the set of annotation labels
         contained in the file to the 'contained_labels' attribute of the
         returned object. This table will contain the columns:
         ['label_store', 'symbol', 'description', 'n_occurences']
     return_df : bool, optional
-        Whether to return a pandas DataFrame instead of a wfdb Annotation.
+        Whether to return a pandas DataFrame instead of a wfdb
+        Annotation.
 
     Returns
     -------
-    annotation : Annotation
-        The Annotation object. Call help(wfdb.Annotation) for the attribute
-        descriptions.
+    annotation : wfdb Annotation or pandas DataFrame
+        The annotation object or dataframe, depending on the
+        `return_df` parameter.
+
+        The Annotation object. Call help(wfdb.Annotation) for the
+        attribute descriptions.
+
 
     Notes
     -----
-    For every annotation sample, the annotation file explictly stores the
-    'sample' and 'symbol' fields, but not necessarily the others. When reading
-    annotation files using this function, fields which are not stored in the
-    file will either take their default values of 0 or None, or will be carried
-    over from their previous values if any.
+    For every annotation sample, the annotation file explictly stores
+    the 'sample' and 'symbol' fields, but not necessarily the others.
+    When reading annotation files using this function, fields which are
+    not stored in the file will either take their default values of 0 or
+    empty, or will be carried over from their previous values if any.
 
     Examples
     --------
@@ -1312,8 +1318,8 @@ def rdann(record_name, extension, sampfrom=0, sampto=None, shift_samps=False,
 
     # Try to extract information describing the annotation file
     (fs,
-     custom_labels) = interpret_defintion_annotations(potential_definition_inds,
-                                                      aux_note)
+     custom_labels) = interpret_defintion_annotations(
+        potential_definition_inds, aux_note)
 
     # Remove annotations that do not store actual sample and label information
     (sample, label_store, subtype,
@@ -1322,7 +1328,8 @@ def rdann(record_name, extension, sampfrom=0, sampto=None, shift_samps=False,
 
     # Convert lists to numpy arrays
     (sample, label_store, subtype, chan, num) = lists_to_arrays(
-        ['int', 'int', 'int', 'int', 'int'], sample, label_store, subtype, chan, num)
+        ['int', 'int', 'int', 'int', 'int'], sample, label_store, subtype,
+        chan, num)
 
     # Try to get fs from the header file if it is not contained in the
     # annotation file
@@ -1364,7 +1371,9 @@ def rdann(record_name, extension, sampfrom=0, sampto=None, shift_samps=False,
 
 
 def check_read_inputs(sampfrom, sampto, return_label_elements):
-
+    """
+    Helper function to check the validity of input fields for `rdann`
+    """
     if sampto and sampto <= sampfrom:
         raise ValueError("sampto must be greater than sampfrom")
     if sampfrom < 0:
@@ -1378,8 +1387,12 @@ def check_read_inputs(sampfrom, sampto, return_label_elements):
 
     return return_label_elements
 
-# Load the annotation file 1 byte at a time and arrange in pairs
 def load_byte_pairs(record_name, extension, pb_dir):
+    """
+    Load the annotation file bytes as unsigned 8 bit values and arrange
+    them into pairs
+
+    """
     # local file
     if pb_dir is None:
         with open(record_name + '.' + extension, 'rb') as f:
@@ -1390,8 +1403,11 @@ def load_byte_pairs(record_name, extension, pb_dir):
 
     return filebytes
 
-#  Get regular annotation fields from the annotation bytes
+
 def proc_ann_bytes(filebytes, sampto):
+    """
+    Get regular annotation fields from the annotation bytes
+    """
 
     # Base annotation fields
     sample, label_store, subtype, chan, num, aux_note = [], [], [], [], [], []
@@ -1440,9 +1456,11 @@ def proc_ann_bytes(filebytes, sampto):
 
     return sample, label_store, subtype, chan, num, aux_note
 
-# Get the sample difference and store fields of the current annotation
 def proc_core_fields(filebytes, bpi):
-
+    """
+    Process file bytes to get the sample difference and label_store
+    fields of the current annotation.
+    """
     label_store = filebytes[bpi, 1] >> 2
 
     # The current byte pair will contain either the actual d_sample + annotation store value,
@@ -1471,7 +1489,8 @@ def proc_core_fields(filebytes, bpi):
 
     return sample_diff, label_store, bpi
 
-def proc_extra_field(label_store, filebytes, bpi, subtype, chan, num, aux_note, update):
+def proc_extra_field(label_store, filebytes, bpi, subtype, chan, num, aux_note,
+                     update):
     """
     Process extra fields belonging to the current annotation.
     Potential updated fields: subtype, chan, num, aux_note
@@ -1730,7 +1749,6 @@ ANN_EXTENSIONS = pd.DataFrame(data=[
 # The standard library annotation label map
 ANN_LABELS = pd.DataFrame(data=[
     # 0 is used in the file as an indicator flag.
-    # (0, ' ', 'Not an actual annotation'),
     (1, 'N', 'Normal beat'),
     (2, 'L', 'Left bundle branch block beat'),
     (3, 'R', 'Right bundle branch block beat'),
