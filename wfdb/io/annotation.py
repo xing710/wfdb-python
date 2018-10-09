@@ -11,6 +11,17 @@ from . import _header
 from . import record
 
 
+# The data fields for each individual annotation
+ANN_DATA_FIELDS = ['sample', 'symbol', 'subtype', 'chan', 'num', 'aux_note',
+    'label_store', 'description']
+
+# Information fields describing the entire annotation set
+ANN_INFO_FIELDS = ['record_name', 'extension', 'fs', 'custom_labels']
+
+# Data fields describing the annotation label
+ANN_LABEL_FIELDS = ('label_store', 'symbol', 'description')
+
+
 class Annotation(object):
     """
     The class representing WFDB annotations.
@@ -22,9 +33,13 @@ class Annotation(object):
     annotation as specified by:
     https://www.physionet.org/physiotools/wag/annot-5.htm
 
-    Call `show_ann_labels()` to see the list of standard annotation
-    codes. Any text used to label annotations that are not one of these
-    codes should go in the 'aux_note' field rather than the 'sym' field.
+    Call `show_ann_labels()` to see the standard annotation label
+    definitions. When writing annotation files, please adhere to these
+    standards for all annotation definitions present in this table, and
+    define the `custom_labels` field for items that are not present.
+
+    Supplementary text used to label annotations should go in the
+    'aux_note' field rather than the 'symbol' field.
 
     Examples
     --------
@@ -33,14 +48,6 @@ class Annotation(object):
                                aux_note=[None, None, 'Serious Vfib'])
 
     """
-    # The data fields for each individual annotation
-    DATA_FIELDS = ['sample', 'symbol', 'subtype', 'chan', 'num',
-        'aux_note', 'label_store', 'description']
-
-    # Information fields describing the entire annotation set
-    INFO_FIELDS = ['record_name', 'extension', 'fs', 'custom_labels']
-
-
     def __init__(self, record_name, extension, sample, symbol=None,
                  subtype=None, chan=None, num=None, aux_note=None,
                  fs=None, label_store=None, description=None,
@@ -145,11 +152,16 @@ class Annotation(object):
         kept_inds = np.intersect1d(np.where(self.sample>=sampfrom),
                                    np.where(self.sample<=sampto))
 
-
         for field in ['sample', 'label_store', 'subtype', 'chan', 'num']:
             setattr(self, field, getattr(self, field)[kept_inds])
 
         self.aux_note = [self.aux_note[i] for i in kept_inds]
+
+    def contained_data_fields(self):
+        """
+        Return the data fields possessed by this object
+        """
+        return [f for f in ANN_DATA_FIELDS if hasattr(self, f)]
 
     def wrann(self, write_fs=False, write_dir=''):
         """
@@ -853,6 +865,28 @@ class Annotation(object):
         else:
             return contained_labels
 
+    def _set_data_fields(self, data_fields, rm_remainder=True):
+        """
+        Keep or set the specified data fields.
+
+        If `rm_remainder` is True, remove all others.
+
+        """
+        # The fields that need to be set
+        set_fields = set(data_fields) - set(self.contained_data_fields())
+        # Only label fields can be set from other label fields
+        if not set(set_fields).issubset(set(ANN_LABEL_FIELDS)):
+            raise ValueError('Unable to set non-label fields that are not already contained.')
+
+        for f in set_fields:
+
+
+        if rm_remainder:
+            # The fields that need to be removed
+            rm_fields = set(self.contained_data_fields()) - set(data_fields)
+            for f in rm_fields:
+                delattr(self, f)
+
     def set_label_elements(self, wanted_label_elements):
         """
         Set one or more label elements based on
@@ -929,11 +963,13 @@ class Annotation(object):
         else:
             return target_item
 
-    def to_df(self):
+    def to_df(self, fields=None):
         """
         Create a pandas DataFrame from the Annotation object
 
         """
+        fields = fields or ANN_DATA_FIELDS[:6]
+
         df = pd.DataFrame(data={'sample':self.sample, 'symbol':self.symbol,
             'subtype':self.subtype, 'chan':self.chan, 'num':self.num,
             'aux_note':self.aux_note}, columns=['sample', 'symbol', 'subtype',
@@ -1189,7 +1225,7 @@ def wrann(record_name, extension, sample, symbol=None, subtype=None, chan=None,
 
 def show_ann_labels():
     """
-    Display the standard wfdb annotation label mapping table.
+    Display the standard WFDB annotation label defintion map.
 
     When writing WFDB annotation files, please adhere to these standards
     for all annotation definitions present in this table, and define the
@@ -1239,8 +1275,7 @@ def show_ann_classes():
 
 def rdann(record_name, extension, sampfrom=0, sampto=None,
           shift_samps=False, pb_dir=None,
-          data_fields=Annotation.DATA_FIELDS[:6],
-          summarize_labels=False, return_df=False):
+          data_fields=None, summarize_labels=False, return_df=False):
     """
     Read a WFDB annotation file named: <record_name>.<extension> and
     return the information of the annotation set.
@@ -1267,7 +1302,7 @@ def rdann(record_name, extension, sampfrom=0, sampto=None,
         pb_dir='mitdb'.
     data_fields : list, optional
         The data elements that are to be returned. Must be a subset of
-        Annotation.DATA_FIELDS.
+        ANN_DATA_FIELDS.
     summarize_labels : bool, optional
         If True, assign a summary table of the set of annotation labels
         contained in the file to the 'contained_labels' attribute of the
@@ -1301,35 +1336,31 @@ def rdann(record_name, extension, sampfrom=0, sampto=None,
 
     """
 
-    return_label_elements = check_read_inputs(sampfrom, sampto,
-                                              return_label_elements)
+    data_fields = check_read_inputs(sampfrom, sampto, data_fields)
 
     # Read the file in byte pairs
-    filebytes = load_byte_pairs(record_name, extension, pb_dir)
+    file_bytes = load_byte_pairs(record_name, extension, pb_dir)
 
-    # Get wfdb annotation fields from the file bytes
-    (sample, label_store, subtype,
-     chan, num, aux_note) = proc_ann_bytes(filebytes, sampto)
+    # Get the annotation data fields from the file bytes
+    (sample, label_store, subtype, chan, num, aux_note) = extract_ann_data(
+        file_bytes, sampto)
 
-    # Get the indices of annotations that hold definition information about
-    # the entire annotation file, and other empty annotations to be removed.
-    potential_definition_inds, rm_inds = get_special_inds(sample, label_store,
-                                                          aux_note)
+    # Get the indices of annotations that hold definition information
+    # about the entire annotation file, and other empty annotations to
+    # be removed.
+    potential_info_inds, rm_inds = get_info_inds(sample, label_store, aux_note)
 
     # Try to extract information describing the annotation file
-    (fs,
-     custom_labels) = interpret_defintion_annotations(
-        potential_definition_inds, aux_note)
+    (fs, custom_labels) = extract_ann_info(potential_info_inds, aux_note)
 
     # Remove annotations that do not store actual sample and label information
-    (sample, label_store, subtype,
-     chan, num, aux_note) = rm_empty_indices(rm_inds, sample, label_store,
-                                             subtype, chan, num, aux_note)
+    (sample, label_store, subtype, chan, num, aux_note) = rm_empty_indices(
+        rm_inds, sample, label_store, subtype, chan, num, aux_note)
 
     # Convert lists to numpy arrays
     (sample, label_store, subtype, chan, num) = lists_to_arrays(
-        ['int', 'int', 'int', 'int', 'int'], sample, label_store, subtype,
-        chan, num)
+        ['int', 'int', 'int', 'int', 'int', 'object'], sample, label_store,
+        subtype, chan, num, aux_note)
 
     # Try to get fs from the header file if it is not contained in the
     # annotation file
@@ -1343,12 +1374,12 @@ def rdann(record_name, extension, sampfrom=0, sampto=None,
     # Create the annotation object
     annotation = Annotation(record_name=os.path.split(record_name)[1],
                             extension=extension, sample=sample,
-                            label_store=label_store,  subtype=subtype,
+                            label_store=label_store, subtype=subtype,
                             chan=chan, num=num, aux_note=aux_note, fs=fs,
                             custom_labels=custom_labels)
 
     # Apply the desired index range
-    if sampfrom > 0 and sampto is not None:
+    if sampfrom or sampto:
         annotation.apply_range(sampfrom=sampfrom, sampto=sampto)
 
     # If specified, obtain annotation samples relative to the starting
@@ -1362,7 +1393,9 @@ def rdann(record_name, extension, sampfrom=0, sampto=None,
         annotation.get_contained_labels(inplace=True)
 
     # Set/unset the desired label values
-    annotation.set_label_elements(return_label_elements)
+    # annotation.set_label_elements(return_label_elements)
+
+    annotation.filter_data_elements(data_fields=data_fields)
 
     if return_df:
         annotation = annotation.to_df()
@@ -1370,22 +1403,24 @@ def rdann(record_name, extension, sampfrom=0, sampto=None,
     return annotation
 
 
-def check_read_inputs(sampfrom, sampto, return_label_elements):
+def check_read_inputs(sampfrom, sampto, data_fields):
     """
     Helper function to check the validity of input fields for `rdann`
     """
     if sampto and sampto <= sampfrom:
-        raise ValueError("sampto must be greater than sampfrom")
+        raise ValueError('sampto must be greater than sampfrom')
     if sampfrom < 0:
-        raise ValueError("sampfrom must be a non-negative integer")
+        raise ValueError('sampfrom must be a non-negative integer')
 
-    if isinstance(return_label_elements, str):
-        return_label_elements = [return_label_elements]
+    if isinstance(data_fields, str):
+        data_fields = [data_fields]
 
-    if set.union(set(ANN_LABEL_FIELDS), set(return_label_elements))!=set(ANN_LABEL_FIELDS):
-        raise ValueError('return_label_elements must be a list containing one or more of the following elements:',label_types)
+    data_fields = data_fields or ANN_DATA_FIELDS[:6]
 
-    return return_label_elements
+    if not data_fields.issubset(ANN_DATA_FIELDS):
+        raise ValueError('elements of `data_fields` must only include the following:', label_types)
+
+    return data_fields
 
 def load_byte_pairs(record_name, extension, pb_dir):
     """
@@ -1396,17 +1431,18 @@ def load_byte_pairs(record_name, extension, pb_dir):
     # local file
     if pb_dir is None:
         with open(record_name + '.' + extension, 'rb') as f:
-            filebytes = np.fromfile(f, '<u1').reshape([-1, 2])
+            file_bytes = np.fromfile(f, '<u1').reshape([-1, 2])
     # physiobank file
     else:
-        filebytes = download._stream_annotation(record_name+'.'+extension, pb_dir).reshape([-1, 2])
+        file_bytes = download._stream_annotation(
+            '.'.join(record_nam, extension), pb_dir).reshape([-1, 2])
 
-    return filebytes
+    return file_bytes
 
 
-def proc_ann_bytes(filebytes, sampto):
+def extract_ann_data(file_bytes, sampto):
     """
-    Get regular annotation fields from the annotation bytes
+    Extract the annotation data fields from the annotation file bytes
     """
 
     # Base annotation fields
@@ -1426,10 +1462,9 @@ def proc_ann_bytes(filebytes, sampto):
     # - samp + sym pair
     # - other pairs (if any)
     # The last byte pair of the file is 0 indicating eof.
-    while (bpi < filebytes.shape[0] - 1):
-
+    while (bpi < file_bytes.shape[0] - 1):
         # Get the sample and label_store fields of the current annotation
-        sample_diff, current_label_store, bpi = proc_core_fields(filebytes, bpi)
+        sample_diff, current_label_store, bpi = proc_core_fields(file_bytes, bpi)
         sample_total = sample_total + sample_diff
         sample.append(sample_total)
         label_store.append(current_label_store)
@@ -1440,12 +1475,12 @@ def proc_ann_bytes(filebytes, sampto):
         update = {'subtype':True, 'chan':True, 'num':True, 'aux_note':True}
         # Get the next label store value - it may indicate additional
         # fields for this annotation, or the values of the next annotation.
-        current_label_store = filebytes[bpi, 1] >> 2
+        current_label_store = file_bytes[bpi, 1] >> 2
 
         while (current_label_store > 59):
-            update, bpi = proc_extra_field(current_label_store, filebytes, bpi,
+            update, bpi = proc_extra_field(current_label_store, file_bytes, bpi,
                 subtype, chan, num, aux_note, update)
-            current_label_store = filebytes[bpi, 1] >> 2
+            current_label_store = file_bytes[bpi, 1] >> 2
 
         # Set defaults or carry over previous values if necessary
         update_extra_fields(subtype, chan, num, aux_note, update)
@@ -1456,73 +1491,76 @@ def proc_ann_bytes(filebytes, sampto):
 
     return sample, label_store, subtype, chan, num, aux_note
 
-def proc_core_fields(filebytes, bpi):
+def proc_core_fields(file_bytes, bpi):
     """
     Process file bytes to get the sample difference and label_store
-    fields of the current annotation.
+    fields of the current annotation. Helper function to
+    `extract_ann_data.
     """
-    label_store = filebytes[bpi, 1] >> 2
+    label_store = file_bytes[bpi, 1] >> 2
 
     # The current byte pair will contain either the actual d_sample + annotation store value,
     # or 0 + SKIP.
 
     # Not a skip - it is the actual sample number + annotation type store value
     if label_store != 59:
-        sample_diff = filebytes[bpi, 0] + 256 * (filebytes[bpi, 1] & 3)
+        sample_diff = file_bytes[bpi, 0] + 256 * (file_bytes[bpi, 1] & 3)
         bpi = bpi + 1
     # Skip. Note: Could there be another skip after the first?
     else:
         # 4 bytes storing dt
-        sample_diff = 65536 * filebytes[bpi + 1,0] + 16777216 * filebytes[bpi + 1,1] \
-             + filebytes[bpi + 2,0] + 256 * filebytes[bpi + 2,1]
+        sample_diff = 65536 * file_bytes[bpi + 1,0] + 16777216 * file_bytes[bpi + 1,1] \
+             + file_bytes[bpi + 2,0] + 256 * file_bytes[bpi + 2,1]
 
         # Data type is long integer (stored in two's complement). Range -2**31 to 2**31 - 1
         if sample_diff > 2147483647:
             sample_diff = sample_diff - 4294967296
 
         # After the 4 bytes, the next pair's samp is also added
-        sample_diff = sample_diff + filebytes[bpi + 3, 0] + 256 * (filebytes[bpi + 3, 1] & 3)
+        sample_diff = sample_diff + file_bytes[bpi + 3, 0] + 256 * (file_bytes[bpi + 3, 1] & 3)
 
         # The label is stored after the 4 bytes. Samples here should be 0.
-        label_store = filebytes[bpi + 3, 1] >> 2
+        label_store = file_bytes[bpi + 3, 1] >> 2
         bpi = bpi + 4
 
     return sample_diff, label_store, bpi
 
-def proc_extra_field(label_store, filebytes, bpi, subtype, chan, num, aux_note,
-                     update):
+def proc_extra_field(label_store, file_bytes, bpi, subtype, chan, num,
+                     aux_note, update):
     """
     Process extra fields belonging to the current annotation.
     Potential updated fields: subtype, chan, num, aux_note
-    """
 
+    Helper function to `extract_ann_data`
+
+    """
     # aux_note and sub are reset between annotations. chan and num copy over
     # previous value if missing.
 
     # SUB
     if label_store == 61:
         # sub is interpreted as signed char.
-        subtype.append(filebytes[bpi, 0].astype('i1'))
+        subtype.append(file_bytes[bpi, 0].astype('i1'))
         update['subtype'] = False
         bpi = bpi + 1
     # CHAN
     elif label_store == 62:
         # chan is interpreted as un_signed char
-        chan.append(filebytes[bpi, 0])
+        chan.append(file_bytes[bpi, 0])
         update['chan'] = False
         bpi = bpi + 1
     # NUM
     elif label_store == 60:
         # num is interpreted as signed char
-        num.append(filebytes[bpi, 0].astype('i1'))
+        num.append(file_bytes[bpi, 0].astype('i1'))
         update['num'] = False
         bpi = bpi + 1
     # aux_note
     elif label_store == 63:
         # length of aux_note string. Max 256? No need to check other bits of
         # second byte?
-        aux_notelen = filebytes[bpi, 0]
-        aux_notebytes = filebytes[bpi + 1:bpi + 1 + int(np.ceil(aux_notelen / 2.)),:].flatten()
+        aux_notelen = file_bytes[bpi, 0]
+        aux_notebytes = file_bytes[bpi + 1:bpi + 1 + int(np.ceil(aux_notelen / 2.)),:].flatten()
         if aux_notelen & 1:
             aux_notebytes = aux_notebytes[:-1]
         # The aux_note string
@@ -1564,32 +1602,33 @@ rx_fs = re.compile("## time resolution: (?P<fs>\d+\.?\d*)")
 rx_custom_label = re.compile("(?P<label_store>\d+) (?P<symbol>\S+) (?P<description>.+)")
 
 
-def get_special_inds(sample, label_store, aux_note):
+def get_info_inds(sample, label_store, aux_note):
     """
-    Get the indices of annotations that hold definition information about
-    the entire annotation file, and other empty annotations to be removed.
+    Get the indices of annotations that potentially hold definition
+    information about the entire annotation file, and other empty
+    annotations to be removed.
 
     Note: There is no need to deal with SKIP annotations (label_store=59)
-          which were already dealt with in proc_core_fields and hence not
-          included here.
+          which were already dealt with in proc_core_fields and hence
+          not included here.
     """
 
     s0_inds = np.where(sample == np.int64(0))[0]
     note_inds = np.where(label_store == np.int64(22))[0]
 
-    # sample = 0 with aux_note means there should be an fs or custom label definition.
-    # Either way, they are to be removed.
-    potential_definition_inds = set(s0_inds).intersection(note_inds)
+    # sample = 0 with aux_note means there should be an fs or custom
+    # label definition. Either way, they are to be removed.
+    potential_info_inds = set(s0_inds).intersection(note_inds)
 
     # Other indices which are not actual annotations.
     notann_inds = np.where(label_store == np.int64(0))[0]
 
-    rm_inds = potential_definition_inds.union(set(notann_inds))
+    rm_inds = potential_info_inds.union(set(notann_inds))
 
-    return potential_definition_inds, rm_inds
+    return potential_info_inds, rm_inds
 
 
-def interpret_defintion_annotations(potential_definition_inds, aux_note):
+def extract_ann_info(potential_info_inds, aux_note):
     """
     Try to extract annotation definition information from annotation notes.
     Information that may be contained:
@@ -1600,9 +1639,9 @@ def interpret_defintion_annotations(potential_definition_inds, aux_note):
     fs = None
     custom_labels = []
 
-    if len(potential_definition_inds) > 0:
+    if len(potential_info_inds) > 0:
         i = 0
-        while i<len(potential_definition_inds):
+        while i<len(potential_info_inds):
             if aux_note[i].startswith('## '):
                 if not fs:
                     search_fs = rx_fs.findall(aux_note[i])
@@ -1717,10 +1756,6 @@ ALLOWED_TYPES = {'record_name': (str), 'extension': (str),
                  'contained_labels':(pd.DataFrame, list, tuple)}
 
 str_types = (str, np.str_)
-
-# Elements of the annotation label
-ANN_LABEL_FIELDS = ('label_store', 'symbol', 'description')
-
 
 # Standard WFDB annotation file extensions
 ANN_EXTENSIONS = pd.DataFrame(data=[
