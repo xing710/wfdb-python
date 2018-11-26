@@ -115,7 +115,6 @@ class Annotation(object):
         att2 = other.__dict__
 
         if set(att1.keys()) != set(att2.keys()):
-            print('keyset')
             return False
 
         for k in att1.keys():
@@ -879,7 +878,7 @@ class Annotation(object):
             raise ValueError('Unable to set non-label fields that are not already contained.')
 
         for f in set_fields:
-
+            pass
 
         if rm_remainder:
             # The fields that need to be removed
@@ -1248,7 +1247,7 @@ def show_ann_labels():
     print(ANN_LABELS)
 
 
-def show_ann_classes():
+def show_ann_extensions():
     """
     Display the standard WFDB annotation file extensions and their
     meanings.
@@ -1267,7 +1266,7 @@ def show_ann_classes():
 
     Examples
     --------
-    >>> show_ann_classes()
+    >>> show_ann_extensions()
 
     """
     print(ANN_EXTENSIONS)
@@ -1402,6 +1401,63 @@ def rdann(record_name, extension, sampfrom=0, sampto=None,
 
     return annotation
 
+
+def rdanndata(record_name, extension, sampfrom=0, sampto=None,
+              shift_samps=False, pb_dir=None, data_fields=None):
+    """
+    Read a WFDB annotation file named: <record_name>.<extension> and
+    return the information of the annotation set.
+
+    Parameters
+    ----------
+    record_name : str
+        The record name of the WFDB annotation file. ie. for file
+        '100.atr', record_name='100'.
+    extension : str
+        The annotatator extension of the annotation file. ie. for file
+        '100.atr', extension='atr'.
+    sampfrom : int, optional
+        The minimum sample number for annotations to be returned.
+    sampto : int, optional
+        The maximum sample number for annotations to be returned.
+    shift_samps : bool, optional
+        Specifies whether to return the sample indices relative to
+        `sampfrom` (True), or sample 0 (False).
+    pb_dir : str, optional
+        Option used to stream data from Physiobank. The Physiobank database
+        directory from which to find the required annotation file. eg. For
+        record '100' in 'http://physionet.org/physiobank/database/mitdb':
+        pb_dir='mitdb'.
+    data_fields : list, optional
+        The data elements that are to be returned. Must be a subset of
+        ANN_DATA_FIELDS.
+    summarize_labels : bool, optional
+        If True, assign a summary table of the set of annotation labels
+        contained in the file to the 'contained_labels' attribute of the
+        returned object. This table will contain the columns:
+        ['label_store', 'symbol', 'description', 'n_occurences']
+
+    Returns
+    -------
+    data : Pandas DataFrame
+        A dataframe containing the annotation data. Call
+        `help(wfdb.Annotation)` for the attribute descriptions.
+
+    fields : Dict, optional
+        A dictionary
+
+
+    Notes
+    -----
+    This function is a simplified wrapper around
+
+    Examples
+    --------
+    >>> ann = wfdb.rdann('sample-data/100', 'atr', sampto=300000)
+
+    """
+
+    return data, fields
 
 def check_read_inputs(sampfrom, sampto, data_fields):
     """
@@ -1699,52 +1755,6 @@ def rm_last(*args):
 
 ## ------------- Annotation Field Specifications ------------- ##
 
-"""
-WFDB field specifications for each field. The indexes are the field
-names.
-
-Parameters
-----------
-allowed_types:
-    Data types the field (or its elements) can be.
-delimiter:
-    The text delimiter that precedes the field in the header file.
-write_required:
-    Whether the field is required for writing a header (more stringent
-    than origin WFDB library).
-read_default:
-    The default value for the field when read if any. Most fields do not
-    have a default. The reason for the variation, is that we do not want
-    to imply that some fields are present when they are not, unless the
-    field is essential. See the notes.
-write_default:
-    The default value for the field to fill in before writing, if any.
-
-Notes
------
-In the original WFDB package, certain fields have default values, but
-not all of them. Some attributes need to be present for core
-functionality, ie. baseline, whereas others are not essential, yet have
-defaults, ie. base_time.
-
-This inconsistency has likely resulted in the generation of incorrect
-files, and general confusion. This library aims to make explicit,
-whether certain fields are present in the file, by setting their values
-to None if they are not written in, unless the fields are essential, in
-which case an actual default value will be set.
-
-The read vs write default values are different for 2 reasons:
-1. We want to force the user to be explicit with certain important
-   fields when writing WFDB records fields, without affecting
-   existing WFDB headers when reading.
-2. Certain unimportant fields may be dependencies of other
-   important fields. When writing, we want to fill in defaults
-   so that the user doesn't need to. But when reading, it should
-   be clear that the fields are missing.
-
-"""
-
-
 # Allowed types of each Annotation object attribute.
 ALLOWED_TYPES = {'record_name': (str), 'extension': (str),
                  'sample': (np.ndarray,), 'symbol': (list, np.ndarray),
@@ -1776,7 +1786,7 @@ ANN_EXTENSIONS = pd.DataFrame(data=[
     #AnnotationClass('alh', 'Human reviewed BP alarms', True),
     #AnnotationClass('alm', 'Machine BP alarms', False),
     # separate ecg and other signal category alarms?
-    # Can we use signum to determine the channel it was triggered off?
+    # Can we use chan to determine the channel it was triggered off?
     ], columns=['extension', 'description', 'human_reviewed']
 )
 
@@ -1826,6 +1836,9 @@ ANN_LABELS = pd.DataFrame(data=[
     ], columns=['label_store', 'symbol', 'description']
 )
 
+ANN_LABELS.set_index(ANN_LABELS['label_store'].values, inplace=True)
+
 # The allowed integer range for the label_store value in wfdb
-# annotations. 0 is used to
+# annotations. 0 is used as an indicator.
 LABEL_RANGE = (1, 49)
+
