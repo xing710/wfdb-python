@@ -184,7 +184,7 @@ class Annotation(object):
         self._custom_labels_to_df()
 
         # Create the label map used in this annotaion
-        self.create_label_map()
+        self._create_label_map()
 
         # Check the cohesion of fields
         self.check_field_cohesion(contained_label_fields)
@@ -362,73 +362,31 @@ class Annotation(object):
 
     def check_field_cohesion(self, contained_label_fields):
         """
-        Check that the content and structure of different fields are consistent
-        with one another.
+        Check that the content and structure of different fields are
+        consistent with one another.
         """
         # Ensure all written annotation fields have the same length
         n_annots = len(self.sample)
 
-        for field in ['sample', 'num', 'subtype', 'chan', 'aux_note']+contained_label_fields:
-            if getattr(self, field) is not None:
+        for field in ['sample', 'num', 'subtype', 'chan', 'aux_note'] + contained_label_fields:
+            if getattr(self, field):
                 if len(getattr(self, field)) != n_annots:
-                    raise ValueError("The lengths of the 'sample' and '"+field+"' fields do not match")
+                    raise ValueError("The lengths of the 'sample' and '{}' fields do not match".format(field))
 
-        # Ensure all label fields are defined by the label map. This has to be checked because
-        # it is possible the user defined (or lack of) custom_labels does not capture all the
-        # labels present.
+        # Ensure all label fields are defined by the label map. This has
+        # to be checked because it is possible the user defined (or
+        # lack of) custom_labels does not capture all the labels present.
         for field in contained_label_fields:
             defined_values = self.__label_map__[field].values
 
             if set(getattr(self, field)) - set(defined_values) != set():
-                raise ValueError('\n'.join(['\nThe '+field+' field contains elements not encoded in the stardard WFDB annotation labels, or this object\'s custom_labels field',
-                                      '- To see the standard WFDB annotation labels, call: show_ann_labels()',
-                                      '- To transfer non-encoded symbol items into the aux_note field, call: self.sym_to_aux()',
-                                      '- To define custom labels, set the custom_labels field as a list of tuple triplets with format: (label_store, symbol, description)']))
+                raise ValueError('\n'.join([
+                    '\nThe '+field+' field contains elements not encoded in the stardard WFDB annotation labels, or this object\'s custom_labels field',
+                    '- To see the standard WFDB annotation labels, call: show_ann_labels()',
+                    '- To transfer non-encoded symbol items into the aux_note field, call: self.sym_to_aux()',
+                    '- To define custom labels, set the custom_labels field as a list of tuple triplets with format: (label_store, symbol, description)']))
 
         return
-
-
-    def _generate_custom_labels(self):
-        """
-        Generate custom labels for this object. Scan the contained
-        labels and choose appropriate values.
-
-        If the label_store attribute is not already defined, this
-        function will automatically choose values by trying to use:
-        1. The undefined store values from the standard wfdb annotation
-           label map.
-        2. The unused label store values. This is extracted by finding the
-           set of all labels contained in this annotation object and seeing
-           which symbols/descriptions are not used.
-
-        If there are more custom labels defined than there are enough spaces,
-        even in condition 2 from above, this function will raise an error.
-
-        This function must work when called as a standalone.
-
-        """
-        self._custom_labels_to_df()
-
-        # Assign label_store values to the custom labels if not defined
-        if 'label_store' not in list(custom_labels):
-            undefined_label_stores = self.get_undefined_label_stores()
-
-            if len(custom_labels) > len(undefined_label_stores):
-                available_label_stores = self.get_available_label_stores()
-            else:
-                available_label_stores = undefined_label_stores
-
-            n_custom_labels = custom_labels.shape[0]
-
-            if n_custom_labels > len(available_label_stores):
-                raise ValueError('There are more custom_label definitions than storage values available for them.')
-
-            custom_labels['label_store'] = available_label_stores[:n_custom_labels]
-
-        custom_labels.set_index(custom_labels['label_store'].values, inplace=True)
-        custom_labels = custom_labels[list(ANN_LABEL_FIELDS)]
-
-        self.custom_labels = custom_labels
 
     def _custom_labels_to_df(self):
         """
@@ -467,34 +425,26 @@ class Annotation(object):
                 self.custom_labels = pd.DataFrame({'label_store':label_store,
                     'symbol': symbol, 'description': description})
 
-    def get_undefined_label_stores(self):
+    def _get_available_label_stores(self, usefield=None):
         """
-        Get the label_store values not defined in the
-        standard wfdb annotation labels.
-        """
-        return list(set(range(50)) - set(ANN_LABELS['label_store']))
-
-    def get_available_label_stores(self, usefield='tryall'):
-        """
-        Get the label store values that may be used
-        for writing this annotation.
+        Get the label store values that may be used for writing this
+        annotation.
 
         Available store values include:
         - the undefined values in the standard wfdb labels
-        - the store values not used in the current
-          annotation object.
+        - the store values not used in the current annotation object.
         - the store values whose standard wfdb symbols/descriptions
           match those of the custom labels (if custom_labels exists)
 
         If 'usefield' is explicitly specified, the function will use that
-        field to figure out available label stores. If 'usefield'
-        is set to 'tryall', the function will choose one of the contained
-        attributes by checking availability in the order: label_store, symbol, description
+        field to figure out available label stores. Otherwise, the
+        function will choose one of the contained attributes by checking
+        availability in the order: label_store, symbol, description
+
         """
 
-
         # Figure out which field to use to get available labels stores.
-        if usefield == 'tryall':
+        if not usefield:
             if self.label_store is not None:
                 usefield = 'label_store'
             elif self.symbol is not None:
@@ -503,26 +453,24 @@ class Annotation(object):
                 usefield = 'description'
             else:
                 raise ValueError('No label fields are defined. At least one of the following is required: ', ANN_LABEL_FIELDS)
-            return self.get_available_label_stores(usefield = usefield)
+            return self._get_available_label_stores(usefield=usefield)
         # Use the explicitly stated field to get available stores.
         else:
-            # If usefield == 'label_store', there are slightly fewer/different steps
-            # compared to if it were another option
-
-            contained_field = getattr(self, usefield)
+            # If usefield == 'label_store', the steps are slightly
+            # different.
 
             # Get the unused label_store values
             if usefield == 'label_store':
-                unused_label_stores = set(ANN_LABELS['label_store'].values) - contained_field
+                unused_label_stores = set(ANN_LABELS['label_store'].values) - set(self.label_store)
             else:
                 # the label_store values from the standard wfdb annotation labels
                 # whose symbols are not contained in this annotation
-                unused_field = set(ANN_LABELS[usefield].values) - contained_field
+                unused_field = set(ANN_LABELS[usefield].values) - getattr(self, usefield)
                 unused_label_stores = ANN_LABELS.loc[ANN_LABELS[usefield] in unused_field, 'label_store'].values
 
-            # Get the standard wfdb label_store values overwritten by the
-            # custom_labels if any
-            if self.custom_symbols is not None:
+            # Get the standard wfdb label_store values overwritten by
+            # the custom_labels if any
+            if self.custom_labels is not None:
                 custom_field = set(self._get_custom_labels_attribute(usefield))
                 if usefield == 'label_store':
                     overwritten_label_stores = set(custom_field).intersection(set(ANN_LABELS['label_store']))
@@ -532,8 +480,8 @@ class Annotation(object):
             else:
                 overwritten_label_stores = set()
 
-
-            # The undefined values in the standard wfdb labels
+            # The label_store values in the allowed range, that are not
+            # defined in the standard WFDB label map
             undefined_label_stores = self.get_undefined_label_stores()
             # Final available label stores = undefined + unused + overwritten
             available_label_stores = set(undefined_label_stores).union(set(unused_label_stores)).union(overwritten_label_stores)
@@ -559,7 +507,7 @@ class Annotation(object):
         else:
             if len(self.custom_labels[0]) == 2:
                 if attribute == 'label_store':
-                    raise ValueError('label_store not defined in custom_labels')
+                    raise ValueError('label_store is not defined in custom_labels')
                 elif attribute == 'symbol':
                     a = [l[0] for l in self.custom_labels]
                 elif attribute == 'description':
@@ -574,29 +522,54 @@ class Annotation(object):
 
         return a
 
-
-    def create_label_map(self, inplace=True):
+    def _create_label_map(self):
         """
-        Creates a mapping df based on ANN_LABELS and self.custom_labels.
+        Create a mapping df for the annotation labels, based on
+        ANN_LABELS and self.custom_labels if it exists. Sets the
+        computed map in the `__label_map__` attribute.
 
         The mapping table is composed of the entire WFDB standard
         annotation table, overwritten/appended with custom_labels if
         any.
 
-        Sets the __label_map__ attribute, or returns value.
+        If the `custom_labels` attribute does not yet have the
+        `label_store` column, this function chooses appropriate values,
+        but does not save these values in the same attribute; it only
+        saves the final result in the __label_map__ attribute.
 
         """
         label_map =  ANN_LABELS.copy()
 
-        if self.custom_labels is not None:
-            self.standardize_custom_labels()
-            for i in self.custom_labels.index:
-                label_map.loc[i] = self.custom_labels.loc[i]
+        # Need to deal with custom labels
+        if self.custom_labels:
+            # Ensure it is in df format
+            self._custom_labels_to_df()
+            # If label_store is not explicitly set in custom_labels,
+            # we have to choose appropriate values
+            if 'label_store' not in list(custom_labels):
+                # Check whether we need to overwrite unused values, or
+                # if we can just use the undefined values.
+                undefined_label_stores = get_undefined_label_stores()
+                if self.custom_labels.shape[0] > len(undefined_label_stores):
+                    available_label_stores = self._get_available_label_stores()
+                else:
+                    available_label_stores = undefined_label_stores
+                # Enforce max number of custom labels
+                if self.custom_labels.shape[0] > len(available_label_stores):
+                    raise ValueError('There are more custom_label definitions than storage values available for them.')
 
-        if inplace:
-            self.__label_map__ = label_map
-        else:
-            return label_map
+            custom_labels = self.custom_labels.copy()
+            custom_labels['label_store'] = available_label_stores[:self.custom_labels.shape[0]]
+
+            # Input the custom_labels label store values into the final
+            # label map
+            for i in custom_labels.index:
+                label_map.loc[i] = custom_labels.loc[i]
+            # Arrange the columns and set the index to label_store
+            label_map = label_map[list(ANN_LABEL_FIELDS)]
+            label_map.set_index(label_map['label_store'].values, inplace=True)
+
+        self.__label_map__ = label_map
 
 
     def wr_ann_file(self, write_fs, write_dir=''):
@@ -776,7 +749,7 @@ class Annotation(object):
         self.check_field('symbol')
 
         # Non-encoded symbols
-        label_table_map = self.create_label_map(inplace=False)
+        label_table_map = self._create_label_map(inplace=False)
         external_syms = set(self.symbol) - set(label_table_map['symbol'].values)
 
         if external_syms == set():
@@ -963,7 +936,7 @@ class Annotation(object):
             if getattr(self, target_field) is not None:
                 return
 
-        label_map = self.create_label_map(inplace=False)
+        label_map = self._create_label_map(inplace=False)
         label_map.set_index(source_field, inplace=True)
 
         target_item = label_map.loc[getattr(self, source_field), target_field].values
@@ -1770,6 +1743,13 @@ def rm_last(*args):
     for a in args:
         a.pop()
 
+def get_undefined_label_stores():
+    """
+    Get the label_store values in the allowed range that are not defined
+    in the standard WFDB label map.
+    """
+    return list(set(range(50)) - set(ANN_LABELS['label_store']))
+
 ## ------------- Annotation Field Specifications ------------- ##
 
 # Allowed types of each Annotation object attribute.
@@ -1858,4 +1838,3 @@ ANN_LABELS.set_index(ANN_LABELS['label_store'].values, inplace=True)
 # The allowed integer range for the label_store value in wfdb
 # annotations. 0 is used as an indicator.
 LABEL_RANGE = (1, 49)
-
