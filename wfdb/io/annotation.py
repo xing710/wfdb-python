@@ -106,11 +106,9 @@ class Annotation(object):
         self.description = description
 
         self.custom_labels = custom_labels
-        self.contained_labels = contained_labels
 
-
-    # Equal comparison operator for objects of this type
     def __eq__(self, other):
+        "Equal comparison operator for objects of this type"
         att1 = self.__dict__
         att2 = other.__dict__
 
@@ -175,26 +173,25 @@ class Annotation(object):
         for field in ['record_name', 'extension']:
             if getattr(self, field) is None:
                 raise Exception('Missing required field for writing annotation file: ',field)
-
-        present_label_fields = self.get_label_fields()
-        if not present_label_fields:
+        contained_label_fields = self.contained_label_fields()
+        if not contained_label_fields:
             raise Exception('At least one annotation label field is required to write the annotation: ', ANN_LABEL_FIELDS)
 
         # Check the validity of individual fields
         self.check_fields()
 
         # Standardize the format of the custom_labels field
-        self.standardize_custom_labels()
+        self._custom_labels_to_df()
 
         # Create the label map used in this annotaion
         self.create_label_map()
 
         # Check the cohesion of fields
-        self.check_field_cohesion(present_label_fields)
+        self.check_field_cohesion(contained_label_fields)
 
         # Calculate the label_store field if necessary
-        if 'label_store' not in present_label_fields:
-            self.convert_label_attribute(source_field=present_label_fields[0],
+        if 'label_store' not in contained_label_fields:
+            self.convert_label_attribute(source_field=contained_label_fields[0],
                                          target_field='label_store')
 
         # Write the header file using the specified fields
@@ -202,17 +199,11 @@ class Annotation(object):
 
         return
 
-    def get_label_fields(self):
+    def contained_label_fields(self):
         """
-        Get the present label fields in the object
+        Get the label fields contained in the object
         """
-        present_label_fields = []
-        for field in ANN_LABEL_FIELDS:
-            if getattr(self, field) is not None:
-                present_label_fields.append(field)
-
-        return present_label_fields
-
+        return [field for field in ANN_LABEL_FIELDS if getattr(self, field)]
 
     def check_fields(self):
         """
@@ -369,7 +360,7 @@ class Annotation(object):
         return
 
 
-    def check_field_cohesion(self, present_label_fields):
+    def check_field_cohesion(self, contained_label_fields):
         """
         Check that the content and structure of different fields are consistent
         with one another.
@@ -377,7 +368,7 @@ class Annotation(object):
         # Ensure all written annotation fields have the same length
         n_annots = len(self.sample)
 
-        for field in ['sample', 'num', 'subtype', 'chan', 'aux_note']+present_label_fields:
+        for field in ['sample', 'num', 'subtype', 'chan', 'aux_note']+contained_label_fields:
             if getattr(self, field) is not None:
                 if len(getattr(self, field)) != n_annots:
                     raise ValueError("The lengths of the 'sample' and '"+field+"' fields do not match")
@@ -385,7 +376,7 @@ class Annotation(object):
         # Ensure all label fields are defined by the label map. This has to be checked because
         # it is possible the user defined (or lack of) custom_labels does not capture all the
         # labels present.
-        for field in present_label_fields:
+        for field in contained_label_fields:
             defined_values = self.__label_map__[field].values
 
             if set(getattr(self, field)) - set(defined_values) != set():
@@ -397,16 +388,10 @@ class Annotation(object):
         return
 
 
-    def standardize_custom_labels(self):
+    def _generate_custom_labels(self):
         """
-        Set the custom_labels field of the object to a standardized format:
-        3 column pandas df with ANN_LABEL_FIELDS as columns.
-
-        Does nothing if there are no custom labels defined.
-        Does nothing if custom_labels is already a df with all 3 columns
-
-        If custom_labels is an iterable of pairs/triplets, this
-        function will convert it into a df.
+        Generate custom labels for this object. Scan the contained
+        labels and choose appropriate values.
 
         If the label_store attribute is not already defined, this
         function will automatically choose values by trying to use:
@@ -420,25 +405,9 @@ class Annotation(object):
         even in condition 2 from above, this function will raise an error.
 
         This function must work when called as a standalone.
+
         """
-        custom_labels = self.custom_labels
-
-        if custom_labels is None:
-            return
-
-        self.check_field('custom_labels')
-
-        # Convert to dataframe if not already
-        if not isinstance(custom_labels, pd.DataFrame):
-            if len(self.custom_labels[0]) == 2:
-                symbol = self.get_custom_label_attribute('symbol')
-                description = self.get_custom_label_attribute('description')
-                custom_labels = pd.DataFrame({'symbol': symbol, 'description': description})
-            else:
-                label_store = self.get_custom_label_attribute('label_store')
-                symbol = self.get_custom_label_attribute('symbol')
-                description = self.get_custom_label_attribute('description')
-                custom_labels = pd.DataFrame({'label_store':label_store, 'symbol': symbol, 'description': description})
+        self._custom_labels_to_df()
 
         # Assign label_store values to the custom labels if not defined
         if 'label_store' not in list(custom_labels):
@@ -461,7 +430,42 @@ class Annotation(object):
 
         self.custom_labels = custom_labels
 
-        return
+    def _custom_labels_to_df(self):
+        """
+        Convert the `custom_labels` attribute, if present, into a pandas
+        dataframe, if it is not already.
+
+        - Does nothing if there are no custom labels defined.
+        - Does nothing if custom_labels is already a df with all 3 columns
+        - If custom_labels is an iterable of pairs/triplets, this
+          function will convert it into a df.
+
+        If it contains two fields, assume them to represent 'symbol' and
+        'description'. If it contains three, then they represent
+        ANN_LABEL_FIELDS.
+
+        Do not worry about overwriting the attribute, because the
+        information is still the same.
+
+        """
+        if not self.custom_labels:
+            return
+
+        self.check_field('custom_labels')
+
+        # Convert to dataframe if not already
+        if not isinstance(self.custom_labels, pd.DataFrame):
+            if len(self.custom_labels[0]) == 2:
+                symbol = self._get_custom_labels_attribute('symbol')
+                description = self._get_custom_labels_attribute('description')
+                self.custom_labels = pd.DataFrame({'symbol': symbol,
+                    'description': description})
+            else:
+                label_store = self._get_custom_labels_attribute('label_store')
+                symbol = self._get_custom_labels_attribute('symbol')
+                description = self._get_custom_labels_attribute('description')
+                self.custom_labels = pd.DataFrame({'label_store':label_store,
+                    'symbol': symbol, 'description': description})
 
     def get_undefined_label_stores(self):
         """
@@ -469,7 +473,6 @@ class Annotation(object):
         standard wfdb annotation labels.
         """
         return list(set(range(50)) - set(ANN_LABELS['label_store']))
-
 
     def get_available_label_stores(self, usefield='tryall'):
         """
@@ -520,7 +523,7 @@ class Annotation(object):
             # Get the standard wfdb label_store values overwritten by the
             # custom_labels if any
             if self.custom_symbols is not None:
-                custom_field = set(self.get_custom_label_attribute(usefield))
+                custom_field = set(self._get_custom_labels_attribute(usefield))
                 if usefield == 'label_store':
                     overwritten_label_stores = set(custom_field).intersection(set(ANN_LABELS['label_store']))
                 else:
@@ -537,22 +540,21 @@ class Annotation(object):
 
             return available_label_stores
 
-
-    def get_custom_label_attribute(self, attribute):
+    def _get_custom_labels_attribute(self, attribute):
         """
-        Get a list of the custom_labels attribute.
-        ie. label_store, symbol, or description.
+        Get a list of the custom_labels attribute. ie. label_store,
+        symbol, or description.
 
-        The custom_labels variable could be in
-        a number of formats
+        The custom_labels variable could be in a number of formats. This
+        helper function returns the desired attribute regardless of the
+        format.
         """
-
         if attribute not in ANN_LABEL_FIELDS:
             raise ValueError('Invalid attribute specified')
 
         if isinstance(self.custom_labels, pd.DataFrame):
             if 'label_store' not in list(self.custom_labels):
-                raise ValueError('label_store not defined in custom_labels')
+                raise ValueError('label_store is not defined in custom_labels')
             a = list(self.custom_labels[attribute].values)
         else:
             if len(self.custom_labels[0]) == 2:
@@ -575,14 +577,15 @@ class Annotation(object):
 
     def create_label_map(self, inplace=True):
         """
-        Creates mapping df based on ANN_LABELS and self.custom_labels.
+        Creates a mapping df based on ANN_LABELS and self.custom_labels.
 
-        Table composed of entire WFDB standard annotation table
-        overwritten/appended with custom_labels if any.
+        The mapping table is composed of the entire WFDB standard
+        annotation table, overwritten/appended with custom_labels if
+        any.
+
         Sets the __label_map__ attribute, or returns value.
 
         """
-
         label_map =  ANN_LABELS.copy()
 
         if self.custom_labels is not None:
@@ -866,30 +869,53 @@ class Annotation(object):
 
     def _set_data_fields(self, data_fields, rm_remainder=True):
         """
-        Keep or set the specified data fields.
+        Set the specified annotation data fields.
 
-        If `rm_remainder` is True, remove all others.
+        Remove the remaining undesired fields if specified.
 
         """
-        # The fields that need to be set
+        # The fields that need to be set. Should only be label fields.
         set_fields = set(data_fields) - set(self.contained_data_fields())
         # Only label fields can be set from other label fields
         if not set(set_fields).issubset(set(ANN_LABEL_FIELDS)):
             raise ValueError('Unable to set non-label fields that are not already contained.')
 
-        for f in set_fields:
-            pass
+        self.set_label_fields(label_fields=set_fields)
 
+        # Remove the unwanted fields if specified
         if rm_remainder:
-            # The fields that need to be removed
-            rm_fields = set(self.contained_data_fields()) - set(data_fields)
-            for f in rm_fields:
+            for f in set(self.contained_data_fields()) - set(data_fields):
                 delattr(self, f)
+
+    def set_label_fields(self, label_fields):
+        """
+        Set the specified annotation label fields using already existing
+        label fields.
+
+        IMPLEMENT
+
+        """
+        # Label fields that the object already has, and can use
+        contained_label_fields = self.contained_label_fields()
+
+        if not contained_label_fields:
+            raise Exception('No annotation labels contained in object')
+
+        # Set the missing fields
+        for field in label_fields:
+            if not getattr(self, field):
+                self.convert_label_attribute(contained_elements[0], field)
+
+
 
     def set_label_elements(self, wanted_label_elements):
         """
+        DEPRECATE
+
         Set one or more label elements based on
         at least one of the others
+
+        DEPRECATE
         """
         if isinstance(wanted_label_elements, str):
             wanted_label_elements = [wanted_label_elements]
@@ -905,26 +931,22 @@ class Annotation(object):
         for e in missing_elements:
             self.convert_label_attribute(contained_elements[0], e)
 
-        unwanted_label_elements = list(set(ANN_LABEL_FIELDS)
-                                       - set(wanted_label_elements))
+        unwanted_label_elements = set(ANN_LABEL_FIELDS - set(wanted_label_elements))
 
         self._rm_attributes(unwanted_label_elements)
 
         return
 
-    def _rm_attributes(self, attributes):
-        """
-        Remove the specified attributes from the object.
-        """
-        if isinstance(attributes, str):
-            attributes = [attributes]
-        for a in attributes:
-            delattr(self, a)
-        return
 
-    def convert_label_attribute(self, source_field, target_field,
-                                inplace=True, overwrite=True):
+
+
+
+
+
+    def convert_label_attribute(self, source_field, target_field):
         """
+        UPDATE
+
         Convert one label attribute (label_store, symbol, or
         description) to another. Creates a mapping df on the fly based
         on ANN_LABELS and self.custom_labels
@@ -935,13 +957,6 @@ class Annotation(object):
             The source label attribute.
         target_field : str
             The destination label attribute
-        inplace : bool
-            Whether to set the object attribute, or return the value.
-        overwrite : bool
-            If True, performs conversion and replaces target field
-            attribute even if the target attribute already has a value.
-            If False, does not perform conversion in the aforementioned
-            case. Set to True (do conversion) if inplace=False.
 
         """
         if inplace and not overwrite:
@@ -957,10 +972,16 @@ class Annotation(object):
             # Should already be int64 dtype if target is label_store
             target_item = list(target_item)
 
-        if inplace:
-            setattr(self, target_field, target_item)
-        else:
-            return target_item
+        setattr(self, target_field, target_item)
+
+    def _rm_attributes(self, attributes):
+        """
+        Remove the specified attributes from the object.
+        """
+        if isinstance(attributes, str):
+            attributes = [attributes]
+        for a in attributes:
+            delattr(self, a)
 
     def to_df(self, fields=None):
         """
@@ -1274,7 +1295,7 @@ def show_ann_extensions():
 
 def rdann(record_name, extension, sampfrom=0, sampto=None,
           shift_samps=False, pb_dir=None,
-          data_fields=None, summarize_labels=False, return_df=False):
+          data_fields=None, summarize_labels=False):
     """
     Read a WFDB annotation file named: <record_name>.<extension> and
     return the information of the annotation set.
@@ -1307,16 +1328,11 @@ def rdann(record_name, extension, sampfrom=0, sampto=None,
         contained in the file to the 'contained_labels' attribute of the
         returned object. This table will contain the columns:
         ['label_store', 'symbol', 'description', 'n_occurences']
-    return_df : bool, optional
-        Whether to return a pandas DataFrame instead of a wfdb
-        Annotation.
+
 
     Returns
     -------
-    annotation : wfdb Annotation or pandas DataFrame
-        The annotation object or dataframe, depending on the
-        `return_df` parameter.
-
+    annotation : wfdb Annotation
         The Annotation object. Call help(wfdb.Annotation) for the
         attribute descriptions.
 
@@ -1391,13 +1407,8 @@ def rdann(record_name, extension, sampfrom=0, sampto=None,
     if summarize_labels:
         annotation.get_contained_labels(inplace=True)
 
-    # Set/unset the desired label values
-    # annotation.set_label_elements(return_label_elements)
-
-    annotation.filter_data_elements(data_fields=data_fields)
-
-    if return_df:
-        annotation = annotation.to_df()
+    # Set the desired annotation data fields and remove the rest
+    annotation._set_data_fields(data_fields=data_fields)
 
     return annotation
 
@@ -1449,13 +1460,19 @@ def rdanndata(record_name, extension, sampfrom=0, sampto=None,
 
     Notes
     -----
-    This function is a simplified wrapper around
+    This function is a simplified wrapper around rdann
 
     Examples
     --------
     >>> ann = wfdb.rdann('sample-data/100', 'atr', sampto=300000)
 
     """
+    annotation = rdann(record_name=record_name, extension=extension,
+        sampfrom=sampfrom, sampto=sampto, shift_samps=shift_samps,
+        pb_dir=pb_dir, data_fields=data_fields)
+
+    fields = {'fs':annotation.fs}
+    data = annotation.to_df()
 
     return data, fields
 
@@ -1474,7 +1491,7 @@ def check_read_inputs(sampfrom, sampto, data_fields):
     data_fields = data_fields or ANN_DATA_FIELDS[:6]
 
     if not data_fields.issubset(ANN_DATA_FIELDS):
-        raise ValueError('elements of `data_fields` must only include the following:', label_types)
+        raise ValueError('elements of `data_fields` must only include the following:', ANN_DATA_FIELDS)
 
     return data_fields
 
