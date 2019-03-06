@@ -180,19 +180,15 @@ class Annotation(object):
         """
         self.record_name = record_name
         self.extension = extension
-
         self.sample = sample
         self.symbol = symbol
-
         self.subtype = subtype
         self.chan = chan
         self.num = num
         self.aux_note = aux_note
         self.fs = fs
-
         self.label_store = label_store
         self.description = description
-
         self.custom_labels = custom_labels
 
     def __eq__(self, other):
@@ -251,6 +247,8 @@ class Annotation(object):
     def wrann(self, write_fs=False, write_dir=''):
         """
         Write a WFDB annotation file from this object.
+
+        !!! Should we force an argument to choose the label field used?
 
         Parameters
         ----------
@@ -324,13 +322,13 @@ class Annotation(object):
 
         # Field specific checks
         if field == 'record_name':
-            if bool(re.search('[^-\w]', self.record_name)):
+            if re.search('[^-\w]', self.record_name):
                 raise ValueError('record_name must only comprise of letters, digits, hyphens, and underscores.')
         elif field == 'extension':
-            if bool(re.search('[^a-zA-Z]', self.extension)):
+            if re.search('[^a-zA-Z]', self.extension):
                 raise ValueError('extension must only comprise of letters.')
         elif field == 'fs':
-            if self.fs <=0:
+            if self.fs <= 0:
                 raise ValueError('The fs field must be a non-negative number')
         elif field == 'custom_labels':
             # The role of this section is just to check the elements of
@@ -401,18 +399,18 @@ class Annotation(object):
 
             for e in uniq_elements:
                 if not isinstance(e, str_types):
-                    raise TypeError('Subelements of the '+field+' field must be strings')
+                    raise TypeError("Subelements of the '{}' field must be strings".format(field))
 
             if field == 'symbol':
                 for e in uniq_elements:
                     if len(e) not in [1,2,3]:
-                        raise ValueError('Subelements of the '+field+' field must be strings of length 1 to 3')
+                        raise ValueError("Subelements of the '{}' field must be strings of length 1 to 3".format(field))
                     if bool(re.search('[ \t\n\r\f\v]', e)):
-                        raise ValueError('Subelements of the '+field+' field may not contain whitespace characters')
+                        raise ValueError("Subelements of the '{}' field may not contain whitespace characters".format(field))
             else:
                 for e in uniq_elements:
                     if bool(re.search('[\t\n\r\f\v]', e)):
-                        raise ValueError('Subelements of the '+field+' field must not contain tabs or newlines')
+                        raise ValueError("Subelements of the '{}' field may not contain tabs or newlines".format(field))
 
         elif field == 'sample':
             if len(self.sample) == 1:
@@ -463,6 +461,12 @@ class Annotation(object):
                 if len(getattr(self, field)) != n_annots:
                     raise ValueError("The lengths of the 'sample' and '{}' fields do not match".format(field))
 
+        # Ensure all label fields are consistent with one another.
+        # Only need to check if at least 2 fields.
+        if len(contained_label_fields) >1:
+
+
+
         # Ensure all label fields are defined by the label map. This has
         # to be checked because it is possible the user defined (or
         # lack of) custom_labels does not capture all the labels present.
@@ -476,9 +480,7 @@ class Annotation(object):
                     '- To transfer non-encoded symbol items into the aux_note field, call: self.sym_to_aux()',
                     '- To define custom labels, set the custom_labels field as a list of tuple triplets with format: (label_store, symbol, description)']))
 
-        # Ensure all label fields are consistent with one another.
-        # No need to check if less than 2
-        if len(contained_label_fields) >1:
+
 
 
         # Ensure the lab map is accurate
@@ -860,7 +862,6 @@ class Annotation(object):
                 self.symbol[i] = '"'
         return
 
-
     def get_contained_labels(self):
         """
         Get the set of unique labels contained in this annotation set,
@@ -869,53 +870,50 @@ class Annotation(object):
         Returns a data frame with one column for each contained label
         field, and one for the number of occurences.
 
+        Examples
+        --------
+        >>> # Read an annotation set
+        >>> annotation = wfdb.rdann('b001', 'atr', pb_dir='cebsdb')
+        >>> # Get the contained labels
+        >>> contained_labels = annotation.get_contained_labels()
         """
         if self.custom_labels:
-            self.check_field('custom_labels')
-
             self._custom_labels_to_df()
-            self.custom_labels.set_index(
-                self.custom_labels['label_store'].values, inplace=True)
 
-
-        # Create the label map
-        label_map = ANN_LABELS.copy()
-
-
-        if isinstance(self.custom_labels, (list, tuple)):
-            custom_labels = label_triplets_to_df(self.custom_labels)
-        elif isinstance(self.custom_labels, pd.DataFrame):
-            # Set the index just in case it doesn't already match the label_store
-            self.custom_labels.set_index(
-                self.custom_labels['label_store'].values, inplace=True)
-            custom_labels = self.custom_labels
-        else:
-            custom_labels = None
+        self.check_field_cohesion()
 
         # Merge the standard wfdb labels with the custom labels.
         # custom labels values overwrite standard wfdb if overlap.
-        if custom_labels:
+        if self.custom_labels:
             for i in custom_labels.index:
                 label_map.loc[i] = custom_labels.loc[i]
             # This doesn't work...
             # label_map.loc[custom_labels.index] = custom_labels.loc[custom_labels.index]
 
-        # Get the labels using one of the features
+        # Get the labels using one of the label features
         if self.label_store:
             index_vals = set(self.label_store)
             reset_index = False
+            values, counts = np.unique(self.label_store, return_counts=True)
         elif self.symbol:
             index_vals = set(self.symbol)
             label_map.set_index(label_map['symbol'].values, inplace=True)
             reset_index = True
+            values, counts = np.unique(self.symbol, return_counts=True)
         elif self.description:
             index_vals = set(self.description)
             label_map.set_index(label_map['description'].values, inplace=True)
             reset_index = True
+            values, counts = np.unique(self.description, return_counts=True)
         else:
             raise Exception('No annotation labels contained in object')
 
         contained_labels = label_map.loc[index_vals, :]
+
+        # Add the counts
+        for i in range(len(counts)):
+            contained_labels.loc[values[i], 'n_occurrences'] = counts[i]
+        contained_labels['n_occurrences'] = pd.to_numeric(contained_labels['n_occurrences'], downcast='integer')
 
         if reset_index:
             contained_labels.set_index(contained_labels['label_store'].values,
@@ -1814,5 +1812,3 @@ def get_undefined_label_stores():
     in the standard WFDB label map.
     """
     return list(set(range(50)) - set(ANN_LABELS['label_store']))
-
-## ------------- Annotation Field Specifications ------------- ##
