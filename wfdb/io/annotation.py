@@ -33,7 +33,7 @@ ALLOWED_TYPES = {'record_name': (str), 'extension': (str),
                  'description':(list, np.ndarray),
                  'custom_labels': (pd.DataFrame, list, tuple)}
 
-str_types = (str, np.str_)
+STR_TYPES = (str, np.str_)
 
 # Standard WFDB annotation file extensions
 ANN_EXTENSIONS = pd.DataFrame(data=[
@@ -244,49 +244,48 @@ class Annotation(object):
         """
         return [f for f in ANN_DATA_FIELDS if hasattr(self, f)]
 
-    def wrann(self, write_fs=False, write_dir=''):
+    def wrann(self, label_field='symbol', write_fs=False, write_dir=''):
         """
         Write a WFDB annotation file from this object.
 
-        !!! Should we force an argument to choose the label field used?
-
         Parameters
         ----------
+        label_field : str, optional
+            The field used to write the label information. The
+            annotation object must have this attribute defined.
+            Must be either 'label_store' or 'symbol'. If 'symbol' is
+            chosen, that attribute will be used to calculate label_store
+            which will be written to the file.
         write_fs : bool, optional
             Whether to write the `fs` attribute to the file.
-
-        Notes
-        -----
-        The label_store field will be generated if necessary
+        write_dir : str, optional
+            The directory in which to write the annotation file
 
         """
+        # Validate input parameters
+        if label_field not in ['label_store', 'symbol']:
+            raise Exception("'label_field' must be set to either 'symbol' or 'label_store'.")
 
-        # Check the presence of vital fields
-        contained_label_fields = self._contained_label_fields()
-        if not contained_label_fields:
-            raise Exception('At least one annotation label field is required to write the annotation: ', ANN_LABEL_FIELDS)
-        for field in ['record_name', 'extension']:
-            if getattr(self, field) is None:
-                raise Exception('Missing required field for writing annotation file: ',field)
-
-        # Check the validity of individual fields
-        self.check_fields()
+        # Check the validity of individual fields used to write the file
+        self.check_write_fields(label_field=label_field)
 
         # Standardize the format of the custom_labels field
         self._custom_labels_to_df()
 
-        # Create the label map used in this annotaion
-        self._create_label_map()
-
-        # Set the label_store field if necessary
-        if 'label_store' not in contained_label_fields:
-            self.convert_label_attribute(source_field=contained_label_fields[0],
-                                         target_field='label_store')
-
         # Check the cohesion of the fields
         self.check_field_cohesion()
 
-        # Write the header file using the specified fields
+        # Create the label map used in this annotaion
+        self._create_label_map()
+
+        # Set the label_store field if needed. Requires the label map.
+        if label_field =='symbol':
+            self.convert_label_attribute(source_field='symbol',
+                                         target_field='label_store')
+
+
+
+        # Write the annotation file using the specified fields
         self.wr_ann_file(write_fs=write_fs, write_dir=write_dir)
 
     def _contained_label_fields(self):
@@ -295,13 +294,27 @@ class Annotation(object):
         """
         return [field for field in ANN_LABEL_FIELDS if getattr(self, field)]
 
-    def check_fields(self):
+    def check_write_fields(self, label_field):
         """
-        Check the set fields of the annotation object
+        Check all fields of this object that may be used to write an
+        annotation file.
+
+        Mandatory fields will be checked. Optional fields will be
+        checked if they are defined, and hence liable to affect the
+        output file.
+
         """
         for field in ANN_FIELDS:
-            if hasattr(self, field):
-                self.check_field(field)
+            # Mandatory check
+            if field in ('sample', 'record_name', 'extension', label_field):
+                if getattr(self, field) is not None:
+                    self.check_field(field)
+                else:
+                    raise Exception('Missing required field for writing annotation file: ', field)
+            # Check if defined
+            else:
+                if getattr(self, field) is not None:
+                    self.check_field(field)
 
     def check_field(self, field):
         """
@@ -380,13 +393,13 @@ class Annotation(object):
                     if not hasattr(label_store[i], '__index__'):
                         raise TypeError('The label_store values of the '+field+' field must be integer-like')
 
-                if not isinstance(symbol[i], str_types) or len(symbol[i]) not in [1,2,3]:
+                if not isinstance(symbol[i], STR_TYPES) or len(symbol[i]) not in [1,2,3]:
                     raise ValueError('The symbol values of the '+field+' field must be strings of length 1 to 3')
 
                 if bool(re.search('[ \t\n\r\f\v]', symbol[i])):
                     raise ValueError('The symbol values of the '+field+' field must not contain whitespace characters')
 
-                if not isinstance(description[i], str_types):
+                if not isinstance(description[i], STR_TYPES):
                     raise TypeError('The description values of the '+field+' field must be strings')
 
                 # Would be good to enfore this but existing garbage annotations have tabs and newlines...
@@ -398,7 +411,7 @@ class Annotation(object):
             uniq_elements = set(item)
 
             for e in uniq_elements:
-                if not isinstance(e, str_types):
+                if not isinstance(e, STR_TYPES):
                     raise TypeError("Subelements of the '{}' field must be strings".format(field))
 
             if field == 'symbol':
@@ -552,7 +565,7 @@ class Annotation(object):
         else:
             raise ValueError('No label fields are defined. At least one of the following is required: ', ANN_LABEL_FIELDS)
 
-        # We are using 'label_store', the steps are slightly different.
+        # If we are using 'label_store', the steps are slightly different.
 
         # Get the unused label_store values
         if usefield == 'label_store':
@@ -840,9 +853,8 @@ class Annotation(object):
 
 
     def sym_to_aux(self):
-        # Move non-encoded symbol elements into the aux_note field
+        "Move non-encoded symbol elements into the aux_note field"
         self.check_field('symbol')
-
         # Non-encoded symbols
         label_table_map = self._create_label_map(inplace=False)
         external_syms = set(self.symbol) - set(label_table_map['symbol'].values)
@@ -880,7 +892,7 @@ class Annotation(object):
         if self.custom_labels:
             self._custom_labels_to_df()
 
-        self.check_field_cohesion()
+        # self.check_field_cohesion()
 
         # Merge the standard wfdb labels with the custom labels.
         # custom labels values overwrite standard wfdb if overlap.
@@ -1013,18 +1025,15 @@ class Annotation(object):
             The destination label attribute
 
         """
-        if inplace and not overwrite:
-            if getattr(self, target_field) is not None:
-                return
+        self._create_label_map()
 
-        label_map = self._create_label_map(inplace=False)
-        label_map.set_index(source_field, inplace=True)
 
-        target_item = label_map.loc[getattr(self, source_field), target_field].values
+        target_item = self.__label_map__.loc[getattr(self, source_field), target_field].values
 
-        if target_field != 'label_store':
-            # Should already be int64 dtype if target is label_store
-            target_item = list(target_item)
+        # Shouldn't need this? Just leave as list.
+        # if target_field != 'label_store':
+        #     # Should already be int64 dtype if target is label_store
+        #     target_item = list(target_item)
 
         setattr(self, target_field, target_item)
 
@@ -1042,12 +1051,9 @@ class Annotation(object):
         Create a pandas DataFrame from the Annotation object
 
         """
-        fields = fields or ANN_DATA_FIELDS[:6]
+        fields = fields or ANN_DATA_FIELDS
 
-        df = pd.DataFrame(data={'sample':self.sample, 'symbol':self.symbol,
-            'subtype':self.subtype, 'chan':self.chan, 'num':self.num,
-            'aux_note':self.aux_note}, columns=['sample', 'symbol', 'subtype',
-            'chan', 'aux_note'])
+        df = pd.DataFrame(data={field:getattr(self, field) for field in fields})
         return df
 
 
@@ -1284,17 +1290,20 @@ def wrann(record_name, extension, sample, symbol=None, subtype=None, chan=None,
                             custom_labels=custom_labels)
 
     # Find out which input field describes the labels
-    if symbol is None:
-        if label_store is None:
-            raise Exception("Either the 'symbol' field or the 'label_store' field must be set")
-    else:
-        if label_store is None:
-            annotation.sym_to_aux()
-        else:
+    if symbol:
+        if label_store:
             raise Exception("Only one of the 'symbol' and 'label_store' fields may be input, for describing annotation labels")
+        else:
+            label_field = 'symbol'
+            annotation.sym_to_aux()
+    else:
+        if not label_store:
+            raise Exception("Either the 'symbol' field or the 'label_store' field must be set")
+        label_field = 'label_store'
 
     # Perform field checks and write the annotation file
-    annotation.wrann(write_fs=True, write_dir=write_dir)
+    annotation.wrann(label_field=label_field, write_fs=True,
+        write_dir=write_dir)
 
 
 def show_ann_labels():
